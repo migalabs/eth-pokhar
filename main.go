@@ -43,7 +43,6 @@ func main() {
 		},
 	}
 
-	// generate the crawler
 	if err := app.RunContext(context.Background(), os.Args); err != nil {
 		log.Errorf("error: %v\n", err)
 		os.Exit(1)
