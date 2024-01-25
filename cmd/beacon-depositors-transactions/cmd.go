@@ -34,13 +34,13 @@ var BeaconDepositorsTransactionsCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:        "log-level",
 			Usage:       "Log level: debug, warn, info, error",
-			EnvVars:     []string{"ANALYZER_LOG_LEVEL"},
+			EnvVars:     []string{"LOG_LEVEL"},
 			DefaultText: "info",
 		},
 		&cli.IntFlag{
 			Name:        "db-workers-num",
 			Usage:       "Number of workers to process database operations",
-			EnvVars:     []string{"ANALYZER_DB_WORKER_NUM"},
+			EnvVars:     []string{"DB_WORKER_NUM"},
 			DefaultText: "4",
 		},
 		// &cli.IntFlag{
