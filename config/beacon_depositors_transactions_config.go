@@ -38,4 +38,8 @@ func (c *BeaconDepositorsTransactionsConfig) Apply(ctx *cli.Context) {
 	if ctx.IsSet("db-url") {
 		c.DBUrl = ctx.String("db-url")
 	}
+	if ctx.IsSet("db-workers-num") {
+		c.DBUrl = ctx.String("db-workers-num")
+	}
+
 }

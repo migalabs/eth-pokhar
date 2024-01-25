@@ -31,6 +31,18 @@ var BeaconDepositorsTransactionsCommand = &cli.Command{
 			EnvVars:     []string{"DB_URL"},
 			DefaultText: "postgres://user:password@localhost:5432/goteth",
 		},
+		&cli.StringFlag{
+			Name:        "log-level",
+			Usage:       "Log level: debug, warn, info, error",
+			EnvVars:     []string{"ANALYZER_LOG_LEVEL"},
+			DefaultText: "info",
+		},
+		&cli.IntFlag{
+			Name:        "db-workers-num",
+			Usage:       "Number of workers to process database operations",
+			EnvVars:     []string{"ANALYZER_DB_WORKER_NUM"},
+			DefaultText: "4",
+		},
 		// &cli.IntFlag{
 		// 	Name:        "init-slot",
 		// 	Usage:       "Slot from where to start the backfill",
@@ -43,22 +55,10 @@ var BeaconDepositorsTransactionsCommand = &cli.Command{
 		// 	EnvVars:     []string{"ANALYZER_FINAL_SLOT"},
 		// 	DefaultText: "0",
 		// },
-		// &cli.StringFlag{
-		// 	Name:        "log-level",
-		// 	Usage:       "Log level: debug, warn, info, error",
-		// 	EnvVars:     []string{"ANALYZER_LOG_LEVEL"},
-		// 	DefaultText: "info",
-		// },
 		// &cli.IntFlag{
 		// 	Name:        "workers-num",
 		// 	Usage:       "Number of workers to process validators",
 		// 	EnvVars:     []string{"ANALYZER_WORKER_NUM"},
-		// 	DefaultText: "4",
-		// },
-		// &cli.IntFlag{
-		// 	Name:        "db-workers-num",
-		// 	Usage:       "Number of workers to process database operations",
-		// 	EnvVars:     []string{"ANALYZER_DB_WORKER_NUM"},
 		// 	DefaultText: "4",
 		// },
 		// &cli.StringFlag{
