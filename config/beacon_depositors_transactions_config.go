@@ -1,4 +1,4 @@
-package cmd
+package config
 
 import (
 	cli "github.com/urfave/cli/v2"
@@ -16,7 +16,7 @@ type BeaconDepositorsTransactionsConfig struct {
 	DBUrl      string `json:"db-url"`
 }
 
-func NewAnalyzerConfig() *BeaconDepositorsTransactionsConfig {
+func NewBeaconDepositorsTransactionsConfig() *BeaconDepositorsTransactionsConfig {
 	// Return Default values for the ethereum configuration
 	return &BeaconDepositorsTransactionsConfig{
 		LogLevel:   DefaultLogLevel,

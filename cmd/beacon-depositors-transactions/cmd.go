@@ -6,6 +6,9 @@ import (
 	"syscall"
 	"time"
 
+	beaconDepTx "github.com/migalabs/eth-pokhar/beacon-depositors-transactions"
+	"github.com/migalabs/eth-pokhar/config"
+	"github.com/migalabs/eth-pokhar/utils"
 	"github.com/sirupsen/logrus"
 
 	cli "github.com/urfave/cli/v2"
@@ -87,16 +90,16 @@ var QueryTimeout = 90 * time.Second
 
 func LaunchBeaconDepositorsTransactions(c *cli.Context) error {
 
-	// conf := config.NewAnalyzerConfig()
-	// conf.Apply(c)
+	conf := config.NewBeaconDepositorsTransactionsConfig()
+	conf.Apply(c)
 
-	// logrus.SetLevel(utils.ParseLogLevel(conf.LogLevel))
+	logrus.SetLevel(utils.ParseLogLevel(conf.LogLevel))
 
-	// // generate the block analyzer
-	// blockAnalyzer, err := analyzer.NewChainAnalyzer(c.Context, *conf)
-	// if err != nil {
-	// 	return err
-	// }
+	// generate the beaconDepositorsTransactions
+	beaconDepositorsTransactions, err := beaconDepTx.NewBeaconDepositorsTransactions(c.Context, conf)
+	if err != nil {
+		return err
+	}
 
 	procDoneC := make(chan struct{})
 	sigtermC := make(chan os.Signal, 1)
@@ -104,15 +107,14 @@ func LaunchBeaconDepositorsTransactions(c *cli.Context) error {
 	signal.Notify(sigtermC, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		// blockAnalyzer.Run()
-		logCmdChain.Info("Process finished")
+		beaconDepositorsTransactions.Run()
 		procDoneC <- struct{}{}
 	}()
 
 	select {
 	case <-sigtermC:
 		logCmdChain.Info("Sudden shutdown detected, controlled shutdown of the cli triggered")
-		// blockAnalyzer.Close()
+		beaconDepositorsTransactions.Close()
 
 	case <-procDoneC:
 		logCmdChain.Info("Process successfully finished!")
