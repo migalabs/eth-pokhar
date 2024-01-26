@@ -152,23 +152,33 @@ type GetAssetTransfersResponse struct {
 	PageKey   string          `json:"pageKey"`
 }
 
-func (ac *AlchemyClient) GetAssetTransfers(ctx context.Context, params GetAssetTransfersArgs) ([]AssetTransfer, error) {
-	var raw json.RawMessage
+func (ac *AlchemyClient) GetAllAssetTransfers(ctx context.Context, params *GetAssetTransfersArgs) ([]AssetTransfer, error) {
 	transfers := make([]AssetTransfer, 0)
 	firstCall := true
+
 	for params.PageKey != "" || firstCall {
-		err := ac.rpcClient.CallContext(ctx, &raw, "alchemy_getAssetTransfers", params)
+		newTransfers, newPageKey, err := ac.GetAssetTransfers(ctx, params)
 		if err != nil {
 			return nil, err
 		}
-		var response GetAssetTransfersResponse
-		err = json.Unmarshal(raw, &response)
-		if err != nil {
-			return nil, err
-		}
-		params.PageKey = response.PageKey
+		params.PageKey = newPageKey
 		firstCall = false
-		transfers = append(response.Transfers, transfers...)
+		transfers = append(newTransfers, transfers...)
 	}
 	return transfers, nil
+}
+
+func (ac *AlchemyClient) GetAssetTransfers(ctx context.Context, params *GetAssetTransfersArgs) ([]AssetTransfer, string, error) {
+	var raw json.RawMessage
+
+	err := ac.rpcClient.CallContext(ctx, &raw, "alchemy_getAssetTransfers", params)
+	if err != nil {
+		return nil, "", err
+	}
+	var response GetAssetTransfersResponse
+	err = json.Unmarshal(raw, &response)
+	if err != nil {
+		return nil, "", err
+	}
+	return response.Transfers, response.PageKey, nil
 }
