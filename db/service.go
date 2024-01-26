@@ -15,7 +15,7 @@ import (
 // Static postgres queries, for each modification in the tables, the table needs to be reseted
 var (
 	// wlogrus associated with the postgres db
-	modName  = "db"
+	// modName  = "db"
 	PsqlType = "postgres-db"
 	wlog     = logrus.WithField(
 		"module", PsqlType,
@@ -135,7 +135,10 @@ func (p *PostgresDBService) runWriters() {
 						q, args := TransactionOperation(task.(models.Transaction))
 						persis.query = q
 						persis.values = append(persis.values, args...)
-
+					case models.BeaconDepositModel:
+						q, args := BeaconDepositOperation(task.(models.BeaconDeposit))
+						persis.query = q
+						persis.values = append(persis.values, args...)
 					default:
 						err = fmt.Errorf("could not figure out the type of write task")
 						wlog.Errorf("could not process incoming task, %s", err)
