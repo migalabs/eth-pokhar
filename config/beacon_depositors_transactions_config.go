@@ -14,6 +14,8 @@ type BeaconDepositorsTransactionsConfig struct {
 	LogLevel   string `json:"log-level"`
 	ElEndpoint string `json:"el-endpoint"`
 	DBUrl      string `json:"db-url"`
+	DBWorkers  int    `json:"db-workers-num"`
+	AlchemyURL string `json:"alchemy-url"`
 }
 
 func NewBeaconDepositorsTransactionsConfig() *BeaconDepositorsTransactionsConfig {
@@ -39,7 +41,10 @@ func (c *BeaconDepositorsTransactionsConfig) Apply(ctx *cli.Context) {
 		c.DBUrl = ctx.String("db-url")
 	}
 	if ctx.IsSet("db-workers-num") {
-		c.DBUrl = ctx.String("db-workers-num")
+		c.DBWorkers = ctx.Int("db-workers-num")
+	}
+	if ctx.IsSet("alchemy-url") {
+		c.AlchemyURL = ctx.String("alchemy-url")
 	}
 
 }
