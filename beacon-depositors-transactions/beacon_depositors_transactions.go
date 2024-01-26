@@ -2,6 +2,7 @@ package beacondepositorstransactions
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/migalabs/eth-pokhar/alchemy"
@@ -17,6 +18,8 @@ type BeaconDepositorsTransactions struct {
 	routineClosed chan struct{} // signal that everything was closed succesfully
 	alchemyClient *alchemy.AlchemyClient
 	stop          bool
+	wgMainRoutine *sync.WaitGroup
+	wgDownload    *sync.WaitGroup
 }
 
 func NewBeaconDepositorsTransactions(pCtx context.Context, iconfig *config.BeaconDepositorsTransactionsConfig) (*BeaconDepositorsTransactions, error) {
@@ -36,6 +39,8 @@ func NewBeaconDepositorsTransactions(pCtx context.Context, iconfig *config.Beaco
 		cancel:        cancel,
 		iconfig:       iconfig,
 		alchemyClient: alchemyClient,
+		wgMainRoutine: &sync.WaitGroup{},
+		wgDownload:    &sync.WaitGroup{},
 	}, nil
 }
 
@@ -43,7 +48,10 @@ func (b *BeaconDepositorsTransactions) Run() {
 	defer b.cancel()
 	initTime := time.Now()
 	log.Info("Starting BeaconDepositorsTransactions")
+	b.wgDownload.Add(1)
+	go b.initialDownload()
 
+	b.wgDownload.Wait()
 	analysisDuration := time.Since(initTime).Seconds()
 	log.Info("BeaconDepositorsTransactions finished in ", analysisDuration)
 	b.stop = true

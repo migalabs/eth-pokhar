@@ -43,7 +43,7 @@ var BeaconDepositorsTransactionsCommand = &cli.Command{
 			EnvVars:     []string{"DB_WORKER_NUM"},
 			DefaultText: "4",
 		},
-		&cli.IntFlag{
+		&cli.StringFlag{
 			Name:        "alchemy-url",
 			Usage:       "Alchemy url",
 			EnvVars:     []string{"ALCHEMY_URL"},
