@@ -13,7 +13,7 @@ var (
 		f_tx_hash,
 		f_validator_pubkey)
 		VALUES ($1, $2, $3, $4)
-		ON CONFLICT ON CONSTRAINT t_beacon_deposits_pkey_pkey
+		ON CONFLICT ON CONSTRAINT t_beacon_deposits_pkey
 			DO NOTHING;
 	`
 )

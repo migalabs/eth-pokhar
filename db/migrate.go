@@ -10,7 +10,7 @@ import (
 func (s *PostgresDBService) makeMigrations() {
 
 	m, err := migrate.New(
-		"file://pkg/db/migrations",
+		"file://db/migrations",
 		s.connectionUrl)
 	if err != nil {
 		wlog.Fatalf(err.Error())
