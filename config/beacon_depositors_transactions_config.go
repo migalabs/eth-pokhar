@@ -4,10 +4,12 @@ import (
 	cli "github.com/urfave/cli/v2"
 )
 
-var (
+const (
 	DefaultLogLevel   string = "info"
 	DefaultElEndpoint string = "http://localhost:8545"
 	DefaultDBUrl      string = "postgres://user:password@localhost:5432/goteth"
+	DefaultDBWorkers  int    = 10
+	DefaultAlchemyURL string = "https://eth-mainnet.alchemyapi.io/v2/your-api-key"
 )
 
 type BeaconDepositorsTransactionsConfig struct {
@@ -23,7 +25,9 @@ func NewBeaconDepositorsTransactionsConfig() *BeaconDepositorsTransactionsConfig
 	return &BeaconDepositorsTransactionsConfig{
 		LogLevel:   DefaultLogLevel,
 		DBUrl:      DefaultDBUrl,
-		ElEndpoint: DefaultElEndpoint}
+		ElEndpoint: DefaultElEndpoint,
+		DBWorkers:  DefaultDBWorkers,
+		AlchemyURL: DefaultAlchemyURL}
 }
 
 func (c *BeaconDepositorsTransactionsConfig) Apply(ctx *cli.Context) {
