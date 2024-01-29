@@ -20,8 +20,13 @@ import (
 func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 	defer b.wgDownload.Done()
 	firstCall := true
+
+	lastBlocknumProcessed := b.getDepositsCheckpoint()
+	log.Infof("Last block processed: %d", lastBlocknumProcessed)
+	lastBlocknumProcessedHex := "0x" + strconv.FormatUint(lastBlocknumProcessed, 16)
 	params := alchemy.NewGetAssetTransfersArgs(
 		alchemy.SetToAddress(utils.BeaconContractAddress),
+		alchemy.SetFromBlock(lastBlocknumProcessedHex),
 	)
 	for params.PageKey != "" || firstCall {
 		newTransfers, newPageKey, err := b.alchemyClient.GetAssetTransfers(b.ctx, params)
@@ -60,8 +65,8 @@ func (b *BeaconDepositorsTransactions) processTransfers(transfers []alchemy.Asse
 				}
 				deposit := models.BeaconDeposit{
 					BlockNum:        blockNum,
-					Depositor:       transfer.From,
-					TxHash:          txHash.String(),
+					Depositor:       strings.TrimPrefix(transfer.From, "0x"),
+					TxHash:          strings.TrimPrefix(txHash.String(), "0x"),
 					ValidatorPubkey: pubkey,
 				}
 				b.dbClient.Persist(deposit)
