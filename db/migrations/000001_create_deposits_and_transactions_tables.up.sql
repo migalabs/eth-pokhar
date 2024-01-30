@@ -14,5 +14,5 @@ CREATE TABLE IF NOT EXISTS public.t_beacon_deposits
     f_depositor text,
     f_tx_hash text NOT NULL,
     f_validator_pubkey text,
-    CONSTRAINT t_beacon_deposits_pkey PRIMARY KEY (f_tx_hash)
+    CONSTRAINT t_beacon_deposits_pkey PRIMARY KEY (f_tx_hash,f_validator_pubkey)
 );
