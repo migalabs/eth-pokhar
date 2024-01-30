@@ -15,7 +15,7 @@ type AlchemyClient struct {
 }
 
 func NewAlchemyClient(ctx context.Context, rawurl string) (*AlchemyClient, error) {
-	rpcClient, err := rpc.DialContext(ctx, rawurl)
+	rpcClient, err := rpc.Dial(rawurl)
 	if err != nil {
 		return nil, err
 	}
