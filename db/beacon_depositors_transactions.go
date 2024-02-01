@@ -32,7 +32,8 @@ var (
 	SELECT d.f_depositor, COALESCE(MAX(t.f_block_num), 0) f_max_block_num
 	FROM t_beacon_deposits d
 	LEFT JOIN t_beacon_depositors_transactions t ON d.f_depositor = t.f_depositor
-	GROUP BY d.f_depositor;
+	GROUP BY d.f_depositor
+	ORDER BY f_max_block_num ASC;
 	`
 )
 
