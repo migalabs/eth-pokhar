@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -17,18 +18,19 @@ import (
 )
 
 type BeaconDepositorsTransactions struct {
-	ctx           context.Context
-	cancel        context.CancelFunc
-	iConfig       *config.BeaconDepositorsTransactionsConfig
-	dbClient      *db.PostgresDBService // client to communicate with psql
-	ethClient     *ethclient.Client
-	routineClosed chan struct{} // signal that everything was closed succesfully
-	alchemyClient *alchemy.AlchemyClient
-	stop          bool
-	contractABI   abi.ABI
-	wgMainRoutine *sync.WaitGroup
-	wgDownload    *sync.WaitGroup
-	wgUpdateTx    *sync.WaitGroup
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	iConfig              *config.BeaconDepositorsTransactionsConfig
+	dbClient             *db.PostgresDBService // client to communicate with psql
+	ethClient            *ethclient.Client
+	routineClosed        chan struct{} // signal that everything was closed succesfully
+	alchemyClient        *alchemy.AlchemyClient
+	stop                 bool
+	contractABI          abi.ABI
+	wgMainRoutine        *sync.WaitGroup
+	wgDownload           *sync.WaitGroup
+	wgUpdateTx           *sync.WaitGroup
+	checkpointsProcessed *atomic.Uint64
 }
 
 func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.BeaconDepositorsTransactionsConfig) (*BeaconDepositorsTransactions, error) {
@@ -67,16 +69,17 @@ func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.Beaco
 	}
 
 	return &BeaconDepositorsTransactions{
-		ctx:           ctx,
-		cancel:        cancel,
-		iConfig:       iConfig,
-		dbClient:      idbClient,
-		ethClient:     elClient,
-		contractABI:   contractABI,
-		alchemyClient: alchemyClient,
-		wgMainRoutine: &sync.WaitGroup{},
-		wgDownload:    &sync.WaitGroup{},
-		wgUpdateTx:    &sync.WaitGroup{},
+		ctx:                  ctx,
+		cancel:               cancel,
+		iConfig:              iConfig,
+		dbClient:             idbClient,
+		ethClient:            elClient,
+		contractABI:          contractABI,
+		alchemyClient:        alchemyClient,
+		wgMainRoutine:        &sync.WaitGroup{},
+		wgDownload:           &sync.WaitGroup{},
+		wgUpdateTx:           &sync.WaitGroup{},
+		checkpointsProcessed: &atomic.Uint64{},
 	}, nil
 }
 

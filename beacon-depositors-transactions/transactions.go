@@ -2,10 +2,27 @@ package beacondepositorstransactions
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/migalabs/eth-pokhar/alchemy"
 	"github.com/migalabs/eth-pokhar/models"
+	log "github.com/sirupsen/logrus"
 )
+
+func (b *BeaconDepositorsTransactions) workerFetchTransactions(wg *sync.WaitGroup, checkpointsCh <-chan models.DepositorCheckpoint) {
+	defer wg.Done()
+
+	for checkpoint := range checkpointsCh {
+		newTransactions, err := b.fetchNewTransactions(checkpoint)
+		if err != nil {
+			log.Fatal(err)
+		}
+		go func() {
+			b.dbClient.CopyTransactions(newTransactions)
+			b.checkpointsProcessed.Add(1)
+		}()
+	}
+}
 
 func (b *BeaconDepositorsTransactions) fetchNewTransactions(depositorCheckpoint models.DepositorCheckpoint) ([]models.Transaction, error) {
 	fromBlock := "0x" + strconv.FormatUint(depositorCheckpoint.Checkpoint+1, 16)
@@ -45,6 +62,10 @@ func transfersToTransactions(transfers []alchemy.AssetTransfer, depositor string
 			continue
 		}
 		transactionsMap[transfer.Hash] = true
+		if len(transfer.From) < 3 || len(transfer.To) < 3 || len(transfer.Hash) < 3 {
+			log.Fatal("Invalid transfer data")
+		}
+
 		from := transfer.From[2:]
 		to := transfer.To[2:]
 

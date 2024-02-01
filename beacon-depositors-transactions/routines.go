@@ -6,7 +6,12 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"sync"
+
+	"time"
+
 	"github.com/migalabs/eth-pokhar/alchemy"
+	"github.com/migalabs/eth-pokhar/models"
 	"github.com/migalabs/eth-pokhar/utils"
 )
 
@@ -20,14 +25,59 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 	log.Info("Got checkpoints")
 
 	log.Info("Fetching new transactions")
-	for _, checkpoint := range checkpoints {
-		newTransactions, err := b.fetchNewTransactions(checkpoint)
-		if err != nil {
-			log.Fatal(err)
-		}
-		b.dbClient.CopyTransactions(newTransactions)
+
+	// Create a wait group to wait for all workers to finish
+	var wg sync.WaitGroup
+
+	// Create a channel to communicate with workers
+	checkpointsCh := make(chan models.DepositorCheckpoint)
+
+	// Define the number of workers in the thread pool
+	numWorkers := 15
+
+	// Start the workers
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go b.workerFetchTransactions(&wg, checkpointsCh)
 	}
 
+	// Calculate total number of checkpoints
+	totalCheckpoints := len(checkpoints)
+
+	// Create a counter to keep track of processed checkpoints
+	checkpointsProcessed := 0
+
+	// Log progress and ETA every 1 minute
+	go func() {
+		// Start a ticker to log progress every 1 minute
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		startTime := time.Now()
+		for range ticker.C {
+			elapsedTime := time.Since(startTime)
+			processedPercentage := float64(checkpointsProcessed) / float64(totalCheckpoints) * 100
+			remainingPercentage := 100 - processedPercentage
+			if processedPercentage == 0 {
+				continue
+			}
+			eta := time.Duration(float64(elapsedTime) / processedPercentage * remainingPercentage)
+			log.Infof("Progress: %.2f%% | ETA: %s", processedPercentage, eta.Round(time.Minute))
+		}
+	}()
+
+	// Send checkpoints to workers for processing
+	for _, checkpoint := range checkpoints {
+		checkpointsCh <- checkpoint
+		checkpointsProcessed++
+	}
+
+	// Close the channel to signal that no more transactions will be sent
+	close(checkpointsCh)
+
+	// Wait for all workers to finish
+	wg.Wait()
+
+	log.Info("All transactions fetched")
 }
 
 func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
