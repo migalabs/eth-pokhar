@@ -63,7 +63,9 @@ func BeaconDepositOperation(inputBeaconDeposit models.BeaconDeposit) (string, []
 }
 
 func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) int64 {
-
+	if len(rowSrc) == 0 {
+		return 0
+	}
 	startTime := time.Now()
 
 	// Generate a random text to append to the table name
@@ -143,8 +145,9 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 	if err != nil {
 		wlog.Fatalf("could not drop temporary table: %s", err.Error())
 	}
-
-	wlog.Infof("persisted %d rows in %f seconds", count.RowsAffected(), time.Since(startTime).Seconds())
+	if count.RowsAffected() > 0 {
+		wlog.Debugf("persisted %d rows in %f seconds", count.RowsAffected(), time.Since(startTime).Seconds())
+	}
 
 	return count.RowsAffected()
 }
