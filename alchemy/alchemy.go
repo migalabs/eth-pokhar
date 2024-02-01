@@ -3,6 +3,9 @@ package alchemy
 import (
 	"context"
 	"encoding/json"
+	"math/rand"
+	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -171,12 +174,21 @@ func (ac *AlchemyClient) GetAllAssetTransfers(ctx context.Context, params *GetAs
 func (ac *AlchemyClient) GetAssetTransfers(ctx context.Context, params *GetAssetTransfersArgs) ([]AssetTransfer, string, error) {
 	var raw json.RawMessage
 
-	err := ac.rpcClient.CallContext(ctx, &raw, "alchemy_getAssetTransfers", params)
-	if err != nil {
-		return nil, "", err
+	for {
+		err := ac.rpcClient.CallContext(ctx, &raw, "alchemy_getAssetTransfers", params)
+		if err != nil {
+			if strings.Contains(err.Error(), "429") {
+				waitTime := time.Duration(rand.Intn(250)+1000) * time.Millisecond
+				time.Sleep(waitTime)
+				continue
+			}
+			return nil, "", err
+		}
+		break
 	}
+
 	var response GetAssetTransfersResponse
-	err = json.Unmarshal(raw, &response)
+	err := json.Unmarshal(raw, &response)
 	if err != nil {
 		return nil, "", err
 	}
