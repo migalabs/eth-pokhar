@@ -7,8 +7,10 @@ This file together with the model, has all the needed methods to interact with t
 */
 
 import (
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/migalabs/eth-pokhar/models"
 )
@@ -79,23 +81,69 @@ func (p *PostgresDBService) CopyTransactions(rowSrc []models.Transaction) int64 
 	}
 	startTime := time.Now()
 
-	transactions := transactionsToCopyData(rowSrc)
+	// Generate a random text to append to the table name
+	randomText := uuid.New().String()
 
-	// Copy data into the target table, ignoring duplicates
-	_, err := p.psqlPool.CopyFrom(
-		p.ctx,
-		pgx.Identifier{"t_beacon_depositors_transactions"},
-		[]string{"f_block_num", "f_value", "f_from", "f_to", "f_tx_hash", "f_depositor"},
-		pgx.CopyFromRows(transactions),
-	)
+	// Create the temporary table name with the random text
+	tempTableName := "temp_transactions_" + strings.ReplaceAll(randomText, "-", "_")
 
+	deposits := transactionsToCopyData(rowSrc)
+
+	// Acquire a connection from the pool
+	conn, err := p.psqlPool.Acquire(p.ctx)
 	if err != nil {
-		wlog.Fatalf("could not copy rows into target table: %s", err.Error())
+		wlog.Fatalf("Unable to acquire connection from pool: %s", err.Error())
+	}
+	defer conn.Release()
+
+	// Create a temporary table with a unique constraint
+	_, err = conn.Exec(p.ctx, `
+        CREATE TEMP TABLE IF NOT EXISTS `+tempTableName+` (
+            f_block_num bigint,
+            f_value numeric,
+            f_from text,
+            f_to text,
+            f_tx_hash text,
+            f_depositor text,
+            UNIQUE (f_tx_hash)
+        )
+    `)
+	if err != nil {
+		wlog.Fatalf("could not create temporary table: %s", err.Error())
 	}
 
-	wlog.Infof("Persisted %d rows in %f seconds", len(transactions), time.Since(startTime).Seconds())
+	// Copy data into the temporary table, ignoring duplicates
+	_, err = conn.CopyFrom(
+		p.ctx,
+		pgx.Identifier{tempTableName},
+		[]string{"f_block_num", "f_value", "f_from", "f_to", "f_tx_hash", "f_depositor"},
+		pgx.CopyFromRows(deposits),
+	)
+	if err != nil {
+		wlog.Fatalf("could not copy rows into temporary table: %s", err.Error())
+	}
 
-	return int64(len(transactions))
+	// Insert non-duplicate rows from the temporary table into the target table
+	count, err := conn.Exec(p.ctx, `
+        INSERT INTO t_beacon_depositors_transactions (f_block_num, f_value, f_from, f_to, f_tx_hash, f_depositor)
+        SELECT f_block_num, f_value, f_from, f_to, f_tx_hash, f_depositor
+        FROM `+tempTableName+`
+        ON CONFLICT DO NOTHING
+    `)
+	if err != nil {
+		wlog.Fatalf("could not insert rows into target table: %s", err.Error())
+	}
+
+	// Drop the temporary table
+	_, err = conn.Exec(p.ctx, `DROP TABLE IF EXISTS `+tempTableName)
+	if err != nil {
+		wlog.Fatalf("could not drop temporary table: %s", err.Error())
+	}
+	if count.RowsAffected() > 0 {
+		wlog.Debugf("persisted %d rows in %f seconds", count.RowsAffected(), time.Since(startTime).Seconds())
+	}
+
+	return count.RowsAffected()
 }
 
 func transactionsToCopyData(rows []models.Transaction) [][]interface{} {
