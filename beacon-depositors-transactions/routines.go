@@ -10,9 +10,25 @@ import (
 	"github.com/migalabs/eth-pokhar/utils"
 )
 
-// func (b *BeaconDepositorsTransactions) initialDownload() {
+func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
+	defer b.wgUpdateTx.Done()
+	log.Info("Getting checkpoints")
+	checkpoints, err := b.dbClient.ObtainCheckpointPerDepositor()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Info("Got checkpoints")
 
-// }
+	log.Info("Fetching new transactions")
+	for _, checkpoint := range checkpoints {
+		newTransactions, err := b.fetchNewTransactions(checkpoint)
+		if err != nil {
+			log.Fatal(err)
+		}
+		b.dbClient.CopyTransactions(newTransactions)
+	}
+
+}
 
 func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 	defer b.wgDownload.Done()
@@ -42,7 +58,7 @@ func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 		log.Debugf("Downloaded 1000 more deposits on block %d", num)
 		params.PageKey = newPageKey
 		firstCall = false
-		err = b.processDepositTransfers(newTransfers, 10)
+		err = b.processDepositTransfers(newTransfers, 15)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -28,6 +28,7 @@ type BeaconDepositorsTransactions struct {
 	contractABI   abi.ABI
 	wgMainRoutine *sync.WaitGroup
 	wgDownload    *sync.WaitGroup
+	wgUpdateTx    *sync.WaitGroup
 }
 
 func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.BeaconDepositorsTransactionsConfig) (*BeaconDepositorsTransactions, error) {
@@ -75,6 +76,7 @@ func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.Beaco
 		alchemyClient: alchemyClient,
 		wgMainRoutine: &sync.WaitGroup{},
 		wgDownload:    &sync.WaitGroup{},
+		wgUpdateTx:    &sync.WaitGroup{},
 	}, nil
 }
 
@@ -88,6 +90,15 @@ func (b *BeaconDepositorsTransactions) Run() {
 	b.wgDownload.Wait()
 	analysisDuration := time.Since(initTime).Seconds()
 	log.Info("BeaconDepositorsTransactions finished in ", analysisDuration)
+
+	initTime = time.Now()
+	b.wgUpdateTx.Add(1)
+	log.Info("Starting updateDepositorsTransactions")
+	go b.updateDepositorsTransactions()
+	b.wgUpdateTx.Wait()
+	analysisDuration = time.Since(initTime).Seconds()
+	log.Info("updateDepositorsTransactions finished in ", analysisDuration)
+
 	b.stop = true
 	b.routineClosed <- struct{}{}
 
