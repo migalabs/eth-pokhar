@@ -65,7 +65,7 @@ func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.Beaco
 
 	contractABI, err := abi.JSON(strings.NewReader(string(utils.BeaconchainABI)))
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error parsing ABI: %v", err)
 	}
 
 	return &BeaconDepositorsTransactions{

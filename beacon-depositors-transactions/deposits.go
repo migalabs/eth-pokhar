@@ -16,7 +16,7 @@ import (
 func (b *BeaconDepositorsTransactions) getDepositsCheckpoint() uint64 {
 	lastDeposit, err := b.dbClient.ObtainLastDeposit()
 	if err != nil {
-		logger.Fatal(err)
+		logger.Fatalf("Error obtaining last deposit: %s", err.Error())
 	}
 
 	return lastDeposit.BlockNum

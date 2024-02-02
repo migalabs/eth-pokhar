@@ -20,7 +20,7 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 	log.Info("Getting checkpoints")
 	checkpoints, err := b.dbClient.ObtainCheckpointPerDepositor()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error obtaining checkpoints: %s", err.Error())
 	}
 	log.Info("Got checkpoints")
 
@@ -99,18 +99,18 @@ func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 	for params.PageKey != "" || firstCall {
 		newTransfers, newPageKey, err := b.alchemyClient.GetAssetTransfers(b.ctx, params)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("Error getting asset transfers: %s", err.Error())
 		}
 		num, err := strconv.ParseUint(strings.TrimPrefix(newTransfers[0].BlockNum, "0x"), 16, 64)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("Error parsing block number: %s", err.Error())
 		}
 		log.Debugf("Downloaded 1000 more deposits on block %d", num)
 		params.PageKey = newPageKey
 		firstCall = false
 		err = b.processDepositTransfers(newTransfers, 15)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("Error processing deposit transfers: %s", err.Error())
 		}
 
 	}

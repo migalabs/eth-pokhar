@@ -15,7 +15,7 @@ func (b *BeaconDepositorsTransactions) workerFetchTransactions(wg *sync.WaitGrou
 	for checkpoint := range checkpointsCh {
 		newTransactions, err := b.fetchNewTransactions(checkpoint)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("Error fetching new transactions: %s", err.Error())
 		}
 		go func() {
 			b.dbClient.CopyTransactions(newTransactions)

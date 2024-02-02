@@ -51,7 +51,7 @@ func (p *PostgresDBService) ObtainLastDeposit() (models.BeaconDeposit, error) {
 	rows.Next()
 	err = rows.Scan(&deposit.BlockNum, &deposit.Depositor, &deposit.TxHash, &deposit.ValidatorPubkey)
 	if err != nil {
-		log.Error(err)
+		log.Errorf("error scanning last deposit: %s", err.Error())
 	}
 	rows.Close()
 	return deposit, nil
