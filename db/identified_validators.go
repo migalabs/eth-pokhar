@@ -10,12 +10,23 @@ const (
 		WHERE F_VALIDATOR_PUBKEY != ''
 		ON CONFLICT (f_validator_pubkey) DO NOTHING;
 	`
+	tuncateIdentifiedValidatorsQuery = `
+		TRUNCATE TABLE t_identified_validators;
+	`
 )
 
-func (p *PostgresDBService) AddNewValidators() (int64, error) {
-	count, err := p.psqlPool.Query(p.ctx, addNewValidatorsQuery)
+func (p *PostgresDBService) AddNewValidators() error {
+	_, err := p.psqlPool.Query(p.ctx, addNewValidatorsQuery)
 	if err != nil {
-		return 0, errors.Wrap(err, "error adding new validators to database")
+		return errors.Wrap(err, "error adding new validators to database")
 	}
-	return count.CommandTag().RowsAffected(), nil
+	return nil
+}
+
+func (p *PostgresDBService) TruncateIdentifiedValidators() error {
+	_, err := p.psqlPool.Query(p.ctx, tuncateIdentifiedValidatorsQuery)
+	if err != nil {
+		return errors.Wrap(err, "error truncating identified validators")
+	}
+	return nil
 }

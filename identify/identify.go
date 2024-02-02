@@ -72,12 +72,21 @@ func (i *Identify) Run() {
 
 	log.Info("Starting Identify routine")
 
+	if i.iConfig.RecreateTable {
+		log.Info("Truncating identified validators table")
+		err := i.dbClient.TruncateIdentifiedValidators()
+		if err != nil {
+			log.Fatalf("Error truncating identified validators table: %v", err)
+		}
+		log.Info("Truncated identified validators")
+	}
+
 	log.Info("Adding new validators to database")
-	count, err := i.dbClient.AddNewValidators()
+	err := i.dbClient.AddNewValidators()
 	if err != nil {
 		log.Fatalf("Error adding new validators to database: %v", err)
 	}
-	log.Infof("Added %d new validators to database", count)
+	log.Info("Added new validators to database")
 
 	endTime := time.Now()
 	log.Infof("Identify routine finished in %v", endTime.Sub(initTime))
