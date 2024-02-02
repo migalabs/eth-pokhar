@@ -62,14 +62,18 @@ func transfersToTransactions(transfers []alchemy.AssetTransfer, depositor string
 			continue
 		}
 		transactionsMap[transfer.Hash] = true
-		if len(transfer.From) < 3 || len(transfer.To) < 3 || len(transfer.Hash) < 3 {
-			log.Fatal("Invalid transfer data")
+		from := transfer.From
+		if len(from) > 2 {
+			from = transfer.From[2:]
 		}
-
-		from := transfer.From[2:]
-		to := transfer.To[2:]
-
-		txHash := transfer.Hash[2:]
+		to := transfer.To
+		if len(to) > 2 {
+			to = transfer.To[2:]
+		}
+		txHash := transfer.Hash
+		if len(txHash) > 2 {
+			txHash = transfer.Hash[2:]
+		}
 		blockNum, err := strconv.ParseUint(transfer.BlockNum, 0, 64)
 		if err != nil {
 			return nil, err
