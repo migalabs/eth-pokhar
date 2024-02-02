@@ -3,38 +3,93 @@ package identify
 import (
 	"context"
 	"sync"
-	"sync/atomic"
+	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/migalabs/eth-pokhar/alchemy"
 	"github.com/migalabs/eth-pokhar/config"
 	"github.com/migalabs/eth-pokhar/db"
+	log "github.com/sirupsen/logrus"
 )
 
 type Identify struct {
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	iConfig              *config.IdentifyConfig
-	dbClient             *db.PostgresDBService // client to communicate with psql
-	ethClient            *ethclient.Client
-	routineClosed        chan struct{} // signal that everything was closed succesfully
-	alchemyClient        *alchemy.AlchemyClient
-	stop                 bool
-	contractABI          abi.ABI
-	wgMainRoutine        *sync.WaitGroup
-	wgDownload           *sync.WaitGroup
-	wgUpdateTx           *sync.WaitGroup
-	checkpointsProcessed *atomic.Uint64
+	ctx           context.Context
+	cancel        context.CancelFunc
+	iConfig       *config.IdentifyConfig
+	dbClient      *db.PostgresDBService // client to communicate with psql
+	ethClient     *ethclient.Client
+	routineClosed chan struct{} // signal that everything was closed succesfully
+	alchemyClient *alchemy.AlchemyClient
+	stop          bool
+	wgMainRoutine *sync.WaitGroup
 }
 
 func NewIdentify(pCtx context.Context, iConfig *config.IdentifyConfig) (*Identify, error) {
+	ctx, cancel := context.WithCancel(pCtx)
 
-	return &Identify{}, nil
+	alchemyClient, err := alchemy.NewAlchemyClient(ctx, iConfig.AlchemyURL)
+	if err != nil {
+		return &Identify{
+			ctx:    ctx,
+			cancel: cancel,
+		}, err
+	}
+
+	idbClient, err := db.New(ctx, iConfig.DBUrl, db.WithWorkers(iConfig.DBWorkers))
+	if err != nil {
+		return &Identify{
+			ctx:    ctx,
+			cancel: cancel,
+		}, err
+	}
+
+	idbClient.Connect()
+
+	elClient, err := ethclient.DialContext(ctx, iConfig.ElEndpoint)
+	if err != nil {
+		return &Identify{
+			ctx:    ctx,
+			cancel: cancel,
+		}, err
+	}
+
+	return &Identify{
+		ctx:           ctx,
+		cancel:        cancel,
+		iConfig:       iConfig,
+		dbClient:      idbClient,
+		ethClient:     elClient,
+		routineClosed: make(chan struct{}),
+		alchemyClient: alchemyClient,
+		wgMainRoutine: &sync.WaitGroup{},
+		stop:          false,
+	}, nil
 }
 
 func (i *Identify) Run() {
+	defer i.cancel()
+	initTime := time.Now()
+
+	log.Info("Starting Identify routine")
+
+	log.Info("Adding new validators to database")
+	count, err := i.dbClient.AddNewValidators()
+	if err != nil {
+		log.Fatalf("Error adding new validators to database: %v", err)
+	}
+	log.Infof("Added %d new validators to database", count)
+
+	endTime := time.Now()
+	log.Infof("Identify routine finished in %v", endTime.Sub(initTime))
+
+	i.stop = true
+	i.routineClosed <- struct{}{}
 }
 
 func (i *Identify) Close() {
+	i.cancel()
+	i.ethClient.Close()
+	i.stop = true
+	log.Info("Identify closed")
+	<-i.routineClosed
 }

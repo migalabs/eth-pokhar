@@ -8,7 +8,8 @@ import (
 	"github.com/sirupsen/logrus"
 	cli "github.com/urfave/cli/v2"
 
-	cmd "github.com/migalabs/eth-pokhar/cmd/beacon-depositors-transactions"
+	bdtCmd "github.com/migalabs/eth-pokhar/cmd/beacon-depositors-transactions"
+	iCmd "github.com/migalabs/eth-pokhar/cmd/identify"
 	"github.com/migalabs/eth-pokhar/utils"
 )
 
@@ -39,7 +40,8 @@ func main() {
 
 		EnableBashCompletion: true,
 		Commands: []*cli.Command{
-			cmd.BeaconDepositorsTransactionsCommand,
+			bdtCmd.BeaconDepositorsTransactionsCommand,
+			iCmd.IdentifyCommand,
 		},
 	}
 
