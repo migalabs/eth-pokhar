@@ -88,8 +88,8 @@ var BeaconDepositorsTransactionsCommand = &cli.Command{
 	},
 }
 
-var logCmdChain = logrus.WithField(
-	"module", "chainCommand",
+var logCmdBeaconDepTx = logrus.WithField(
+	"module", "beaconDepositorsTransactionsCommand",
 )
 
 var QueryTimeout = 90 * time.Second
@@ -119,11 +119,11 @@ func LaunchBeaconDepositorsTransactions(c *cli.Context) error {
 
 	select {
 	case <-sigtermC:
-		logCmdChain.Info("Sudden shutdown detected, controlled shutdown of the cli triggered")
+		logCmdBeaconDepTx.Info("Sudden shutdown detected, controlled shutdown of the cli triggered")
 		beaconDepositorsTransactions.Close()
 
 	case <-procDoneC:
-		logCmdChain.Info("Process successfully finished!")
+		logCmdBeaconDepTx.Info("Process successfully finished!")
 	}
 	close(sigtermC)
 	close(procDoneC)

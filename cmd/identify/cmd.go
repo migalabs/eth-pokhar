@@ -88,7 +88,7 @@ var IdentifyCommand = &cli.Command{
 	},
 }
 
-var logCmdChain = logrus.WithField(
+var logCmdIdentify = logrus.WithField(
 	"module", "identifyCommand",
 )
 
@@ -119,11 +119,11 @@ func LaunchIdentify(c *cli.Context) error {
 
 	select {
 	case <-sigtermC:
-		logCmdChain.Info("Sudden shutdown detected, controlled shutdown of the cli triggered")
+		logCmdIdentify.Info("Sudden shutdown detected, controlled shutdown of the cli triggered")
 		identifyRunner.Close()
 
 	case <-procDoneC:
-		logCmdChain.Info("Process successfully finished!")
+		logCmdIdentify.Info("Process successfully finished!")
 	}
 	close(sigtermC)
 	close(procDoneC)
