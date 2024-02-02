@@ -88,6 +88,13 @@ func (i *Identify) Run() {
 	}
 	log.Info("Added new validators to database")
 
+	log.Info("Identifying coinbase validators")
+	err = i.dbClient.IdentifyCoinbaseValidators()
+	if err != nil {
+		log.Fatalf("Error identifying coinbase validators: %v", err)
+	}
+	log.Info("Identified coinbase validators")
+
 	endTime := time.Now()
 	log.Infof("Identify routine finished in %v", endTime.Sub(initTime))
 
