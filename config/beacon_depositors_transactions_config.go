@@ -4,14 +4,6 @@ import (
 	cli "github.com/urfave/cli/v2"
 )
 
-const (
-	DefaultLogLevel   string = "info"
-	DefaultElEndpoint string = "http://localhost:8545"
-	DefaultDBUrl      string = "postgres://user:password@localhost:5432/goteth"
-	DefaultDBWorkers  int    = 10
-	DefaultAlchemyURL string = "https://eth-mainnet.alchemyapi.io/v2/your-api-key"
-)
-
 type BeaconDepositorsTransactionsConfig struct {
 	LogLevel   string `json:"log-level"`
 	ElEndpoint string `json:"el-endpoint"`
