@@ -35,6 +35,9 @@ func (b *BeaconDepositorsTransactions) processDepositTransfers(transfers []alche
 			defer wg.Done()
 			alreadyProcessed := make(map[string]bool)
 			for transfer := range transferCh {
+				if b.stop {
+					return
+				}
 				// Your existing processing logic here...
 				txHash := common.HexToHash(transfer.Hash)
 				if _, ok := alreadyProcessed[transfer.Hash]; ok {
@@ -100,7 +103,7 @@ func (b *BeaconDepositorsTransactions) processDepositTransfers(transfers []alche
 		for deposit := range depositsCh {
 			deposits = append(deposits, deposit)
 		}
-		if len(deposits) > 0 {
+		if len(deposits) > 0 && !b.stop {
 			b.dbClient.CopyBeaconDeposits(deposits)
 		}
 	}()

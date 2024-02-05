@@ -16,7 +16,6 @@ import (
 )
 
 func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
-	defer b.wgUpdateTx.Done()
 	log.Info("Getting checkpoints")
 	checkpoints, err := b.dbClient.ObtainCheckpointPerDepositor()
 	if err != nil {
@@ -54,6 +53,9 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 		defer ticker.Stop()
 		startTime := time.Now()
 		for range ticker.C {
+			if b.stop {
+				return
+			}
 			elapsedTime := time.Since(startTime)
 			processedPercentage := float64(checkpointsProcessed) / float64(totalCheckpoints) * 100
 			remainingPercentage := 100 - processedPercentage
@@ -67,6 +69,9 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 
 	// Send checkpoints to workers for processing
 	for _, checkpoint := range checkpoints {
+		if b.stop {
+			return
+		}
 		checkpointsCh <- checkpoint
 		checkpointsProcessed++
 	}
@@ -81,7 +86,6 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 }
 
 func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
-	defer b.wgDownload.Done()
 	firstCall := true
 
 	lastBlocknumProcessed := b.getDepositsCheckpoint()
@@ -97,6 +101,9 @@ func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 		alchemy.SetCategory([]string{"external", "internal"}),
 	)
 	for params.PageKey != "" || firstCall {
+		if b.stop {
+			return
+		}
 		newTransfers, newPageKey, err := b.alchemyClient.GetAssetTransfers(b.ctx, params)
 		if err != nil {
 			log.Fatalf("Error getting asset transfers: %s", err.Error())

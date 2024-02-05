@@ -13,6 +13,9 @@ func (b *BeaconDepositorsTransactions) workerFetchTransactions(wg *sync.WaitGrou
 	defer wg.Done()
 
 	for checkpoint := range checkpointsCh {
+		if b.stop {
+			return
+		}
 		newTransactions, err := b.fetchNewTransactions(checkpoint)
 		if err != nil {
 			log.Fatalf("Error fetching new transactions: %s", err.Error())

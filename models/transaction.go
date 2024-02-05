@@ -8,7 +8,3 @@ type Transaction struct {
 	TxHash    string  `json:"tx_hash"`
 	Depositor string  `json:"depositor"`
 }
-
-func (t Transaction) Type() ModelType {
-	return TransactionModel
-}
