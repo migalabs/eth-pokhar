@@ -53,6 +53,9 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 		defer ticker.Stop()
 		startTime := time.Now()
 		for range ticker.C {
+			if b.stop {
+				return
+			}
 			elapsedTime := time.Since(startTime)
 			processedPercentage := float64(checkpointsProcessed) / float64(totalCheckpoints) * 100
 			remainingPercentage := 100 - processedPercentage
@@ -66,6 +69,9 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 
 	// Send checkpoints to workers for processing
 	for _, checkpoint := range checkpoints {
+		if b.stop {
+			return
+		}
 		checkpointsCh <- checkpoint
 		checkpointsProcessed++
 	}
