@@ -16,7 +16,6 @@ import (
 )
 
 func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
-	defer b.wgUpdateTx.Done()
 	log.Info("Getting checkpoints")
 	checkpoints, err := b.dbClient.ObtainCheckpointPerDepositor()
 	if err != nil {
@@ -81,7 +80,6 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 }
 
 func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
-	defer b.wgDownload.Done()
 	firstCall := true
 
 	lastBlocknumProcessed := b.getDepositsCheckpoint()
@@ -97,6 +95,9 @@ func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 		alchemy.SetCategory([]string{"external", "internal"}),
 	)
 	for params.PageKey != "" || firstCall {
+		if b.stop {
+			return
+		}
 		newTransfers, newPageKey, err := b.alchemyClient.GetAssetTransfers(b.ctx, params)
 		if err != nil {
 			log.Fatalf("Error getting asset transfers: %s", err.Error())

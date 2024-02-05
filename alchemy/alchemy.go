@@ -129,6 +129,9 @@ func SetMaxCount(value string) func(*GetAssetTransfersArgs) {
 		req.MaxCount = value
 	}
 }
+func (ac *AlchemyClient) Close() {
+	ac.rpcClient.Close()
+}
 
 type RawContract struct {
 	Value   string `json:"value"`

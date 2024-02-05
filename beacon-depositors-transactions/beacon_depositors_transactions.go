@@ -3,7 +3,6 @@ package beacondepositorstransactions
 import (
 	"context"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,9 +26,6 @@ type BeaconDepositorsTransactions struct {
 	alchemyClient        *alchemy.AlchemyClient
 	stop                 bool
 	contractABI          abi.ABI
-	wgMainRoutine        *sync.WaitGroup
-	wgDownload           *sync.WaitGroup
-	wgUpdateTx           *sync.WaitGroup
 	checkpointsProcessed *atomic.Uint64
 }
 
@@ -45,7 +41,7 @@ func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.Beaco
 		}, errors.Wrap(err, "Error creating alchemy client")
 	}
 
-	idbClient, err := db.New(ctx, iConfig.DBUrl, db.WithWorkers(iConfig.DBWorkers))
+	idbClient, err := db.New(ctx, iConfig.DBUrl)
 	if err != nil {
 		return &BeaconDepositorsTransactions{
 			ctx:    ctx,
@@ -76,39 +72,54 @@ func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.Beaco
 		ethClient:            elClient,
 		contractABI:          contractABI,
 		alchemyClient:        alchemyClient,
-		wgMainRoutine:        &sync.WaitGroup{},
-		wgDownload:           &sync.WaitGroup{},
-		wgUpdateTx:           &sync.WaitGroup{},
+		routineClosed:        make(chan struct{}),
 		checkpointsProcessed: &atomic.Uint64{},
 	}, nil
 }
 
 func (b *BeaconDepositorsTransactions) Run() {
 	defer b.cancel()
-	initTime := time.Now()
-	log.Info("Starting BeaconDepositorsTransactions")
-	b.wgDownload.Add(1)
-	go b.downloadBeaconDeposits()
+	log.Info("Starting beacon_depositors_transactions...")
+	totalInitTime := time.Now()
+	if !b.stop {
+		initTime := time.Now()
+		log.Info("Downloading new beacon deposits...")
+		b.downloadBeaconDeposits()
+		duration := time.Since(initTime).Seconds()
+		log.Info("Finished downloading new beacon deposits in ", duration)
 
-	b.wgDownload.Wait()
-	analysisDuration := time.Since(initTime).Seconds()
-	log.Info("BeaconDepositorsTransactions finished in ", analysisDuration)
+	}
+	if !b.stop {
+		initTime := time.Now()
+		log.Info("Updating depositors transactions...")
+		b.updateDepositorsTransactions()
+		duration := time.Since(initTime).Seconds()
+		log.Info("Finished updating depositors transactions in ", duration)
+	}
+	totalDuration := time.Since(totalInitTime).Seconds()
+	log.Info("Finished beacon_depositors_transactions in ", totalDuration)
 
-	initTime = time.Now()
-	b.wgUpdateTx.Add(1)
-	log.Info("Starting updateDepositorsTransactions")
-	go b.updateDepositorsTransactions()
-	b.wgUpdateTx.Wait()
-	analysisDuration = time.Since(initTime).Seconds()
-	log.Info("updateDepositorsTransactions finished in ", analysisDuration)
-
-	b.stop = true
+	b.CloseConnections()
+	log.Debug("Sending signal that beacon_depositors_transactions finished")
 	b.routineClosed <- struct{}{}
-
 }
 
-func (b *BeaconDepositorsTransactions) Close() {
-	log.Info("Sudden closed detected, closing BeaconDepositorsTransactions")
+func (b *BeaconDepositorsTransactions) Stop() {
+	log.Info("Closing beacon_depositors_transactions...")
 	b.stop = true
-	<-b.routineClosed // Wait for services to stop before returning
+	// Wait until the routine is closed
+	<-b.routineClosed
+	log.Info("Closed beacon_depositors_transactions")
+}
+
+func (b *BeaconDepositorsTransactions) CloseConnections() {
+	log.Debug("Closing Eth connection")
+	b.ethClient.Close()
+	log.Debug("Eth connection closed")
+	log.Debug("Closing Alchemy connection")
+	b.alchemyClient.Close()
+	log.Debug("Alchemy connection closed")
+	log.Debug("Closing DB connection")
+	b.dbClient.Finish()
+	log.Debug("DB connection closed")
 }
