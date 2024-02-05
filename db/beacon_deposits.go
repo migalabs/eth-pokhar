@@ -56,40 +56,11 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
             f_block_num bigint,
             f_depositor text,
             f_tx_hash text,
-            f_validator_pubkey text,
-            UNIQUE (f_tx_hash, f_validator_pubkey)
+            f_validator_pubkey text
         )
     `)
 	if err != nil {
 		wlog.Fatalf("could not create temporary table: %s", err.Error())
-	}
-
-	// Add the trigger function to the temporary table
-	_, err = p.psqlPool.Exec(p.ctx, `
-		CREATE OR REPLACE FUNCTION prevent_duplicates()
-		RETURNS TRIGGER AS $$
-		BEGIN
-			IF NEW.f_tx_hash IS NOT NULL AND NEW.f_validator_pubkey IS NOT NULL THEN
-				IF EXISTS (
-					SELECT 1 FROM `+tempTableName+`
-					WHERE f_tx_hash = NEW.f_tx_hash AND f_validator_pubkey = NEW.f_validator_pubkey
-				) THEN
-					RETURN NULL; -- Ignore duplicate
-				END IF;
-			END IF;
-
-			RETURN NEW;
-		END;
-		$$ LANGUAGE plpgsql;
-
-		CREATE TRIGGER  prevent_duplicates_trigger
-		BEFORE INSERT OR UPDATE
-		ON `+tempTableName+`
-		FOR EACH ROW
-		EXECUTE FUNCTION prevent_duplicates();
-	`)
-	if err != nil {
-		wlog.Fatalf("could not add trigger to temporary table: %s", err.Error())
 	}
 
 	// Copy data into the temporary table, ignoring duplicates
