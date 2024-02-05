@@ -6,7 +6,3 @@ type BeaconDeposit struct {
 	TxHash          string `json:"tx_hash"`
 	ValidatorPubkey string `json:"validator_pubkey"`
 }
-
-func (BeaconDeposit) Type() ModelType {
-	return BeaconDepositModel
-}

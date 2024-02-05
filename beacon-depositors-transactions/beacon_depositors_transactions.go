@@ -42,7 +42,7 @@ func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.Beaco
 		}, errors.Wrap(err, "Error creating alchemy client")
 	}
 
-	idbClient, err := db.New(ctx, iConfig.DBUrl, db.WithWorkers(iConfig.DBWorkers))
+	idbClient, err := db.New(ctx, iConfig.DBUrl)
 	if err != nil {
 		return &BeaconDepositorsTransactions{
 			ctx:    ctx,
