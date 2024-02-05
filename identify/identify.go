@@ -88,6 +88,20 @@ func (i *Identify) Run() {
 	}
 	log.Info("Added new validators to database")
 
+	log.Info("Applying validators insert")
+	err = i.dbClient.ApplyValidatorsInsert()
+	if err != nil {
+		log.Fatalf("Error applying validators insert: %v", err)
+	}
+	log.Info("Applied validators insert")
+
+	log.Info("Applying deposits insert")
+	err = i.dbClient.ApplyDepositorsInsert()
+	if err != nil {
+		log.Fatalf("Error applying deposits insert: %v", err)
+	}
+	log.Info("Applied deposits insert")
+
 	log.Info("Identifying coinbase validators")
 	err = i.dbClient.IdentifyCoinbaseValidators()
 	if err != nil {
