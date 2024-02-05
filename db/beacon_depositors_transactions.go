@@ -12,7 +12,7 @@ import (
 
 // Postgres intregration variables
 var (
-	UpsertTransaction = `
+	upsertTransaction = `
 	INSERT INTO t_beacon_depositors_transactions (
 		f_block_num,
 		f_value,
@@ -32,7 +32,7 @@ func insertTransaction(inputTransaction models.Transaction) (string, []interface
 	resultArgs = append(resultArgs, inputTransaction.From)
 	resultArgs = append(resultArgs, inputTransaction.To)
 	resultArgs = append(resultArgs, inputTransaction.TxHash)
-	return UpsertTransaction, resultArgs
+	return upsertTransaction, resultArgs
 }
 
 func TransactionOperation(inputTransaction models.Transaction) (string, []interface{}) {

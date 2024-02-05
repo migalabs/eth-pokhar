@@ -14,7 +14,7 @@ import (
 
 // Postgres intregration variables
 var (
-	SelectLastDeposit = `
+	selectLastDeposit = `
 	SELECT *
 	FROM t_beacon_deposits
 	ORDER BY f_block_num DESC
@@ -23,7 +23,7 @@ var (
 )
 
 func (p *PostgresDBService) ObtainLastDeposit() (models.BeaconDeposit, error) {
-	rows, err := p.psqlPool.Query(p.ctx, SelectLastDeposit)
+	rows, err := p.psqlPool.Query(p.ctx, selectLastDeposit)
 	if err != nil {
 		rows.Close()
 		return models.BeaconDeposit{}, errors.Wrap(err, "error obtaining last epoch from database")
