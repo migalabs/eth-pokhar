@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sirupsen/logrus"
@@ -18,9 +17,6 @@ var (
 	wlog     = logrus.WithField(
 		"module", PsqlType,
 	)
-	MAX_BATCH_QUEUE       = 1000
-	MAX_EPOCH_BATCH_QUEUE = 1
-	RoutineFlushTimeout   = time.Duration(1 * time.Second)
 )
 
 type PostgresDBServiceOption func(*PostgresDBService) error
@@ -30,7 +26,6 @@ type PostgresDBService struct {
 	ctx           context.Context
 	connectionUrl string // the url might not be necessary (better to remove it?¿)
 	psqlPool      *pgxpool.Pool
-	stop          bool
 }
 
 func New(ctx context.Context, url string, options ...PostgresDBServiceOption) (*PostgresDBService, error) {
@@ -79,8 +74,6 @@ func (s *PostgresDBService) Connect() {
 }
 
 func (p *PostgresDBService) Finish() {
-	p.stop = true
-	wlog.Infof("Routines finished...")
 	wlog.Infof("closing connection to database server...")
 	p.psqlPool.Close()
 	wlog.Infof("connection to database server closed...")
