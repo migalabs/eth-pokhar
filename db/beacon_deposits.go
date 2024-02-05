@@ -39,7 +39,8 @@ func (p *PostgresDBService) ObtainLastDeposit() (models.BeaconDeposit, error) {
 }
 
 func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) int64 {
-
+	p.writerThreadsWG.Add(1)
+	defer p.writerThreadsWG.Done()
 	startTime := time.Now()
 
 	// Generate a random text to append to the table name
@@ -92,7 +93,6 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 	}
 
 	wlog.Infof("persisted %d rows in %f seconds", count.RowsAffected(), time.Since(startTime).Seconds())
-
 	return count.RowsAffected()
 }
 

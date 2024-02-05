@@ -84,7 +84,7 @@ func LaunchBeaconDepositorsTransactions(c *cli.Context) error {
 	select {
 	case <-sigtermC:
 		logCmdChain.Info("Sudden shutdown detected, controlled shutdown of the cli triggered")
-		beaconDepositorsTransactions.Close()
+		beaconDepositorsTransactions.Stop()
 
 	case <-procDoneC:
 		logCmdChain.Info("Process successfully finished!")

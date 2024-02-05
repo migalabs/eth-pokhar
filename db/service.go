@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sirupsen/logrus"
@@ -23,16 +24,18 @@ type PostgresDBServiceOption func(*PostgresDBService) error
 
 type PostgresDBService struct {
 	// Control Variables
-	ctx           context.Context
-	connectionUrl string // the url might not be necessary (better to remove it?¿)
-	psqlPool      *pgxpool.Pool
+	ctx             context.Context
+	connectionUrl   string // the url might not be necessary (better to remove it?¿)
+	psqlPool        *pgxpool.Pool
+	writerThreadsWG *sync.WaitGroup
 }
 
 func New(ctx context.Context, url string, options ...PostgresDBServiceOption) (*PostgresDBService, error) {
 	var err error
 	pService := &PostgresDBService{
-		ctx:           ctx,
-		connectionUrl: url,
+		ctx:             ctx,
+		connectionUrl:   url,
+		writerThreadsWG: &sync.WaitGroup{},
 	}
 
 	for _, o := range options {
@@ -74,9 +77,11 @@ func (s *PostgresDBService) Connect() {
 }
 
 func (p *PostgresDBService) Finish() {
-	wlog.Infof("closing connection to database server...")
+	wlog.Debugf("Losing connection to database server...")
+	wlog.Debugf("Waiting for all writer threads to finish...")
+	p.writerThreadsWG.Wait()
 	p.psqlPool.Close()
-	wlog.Infof("connection to database server closed...")
+	wlog.Debugf("Connection to database server closed...")
 }
 
 func (p *PostgresDBService) SingleQuery(query string, args ...interface{}) error {

@@ -3,7 +3,6 @@ package beacondepositorstransactions
 import (
 	"context"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -26,8 +25,6 @@ type BeaconDepositorsTransactions struct {
 	alchemyClient *alchemy.AlchemyClient
 	stop          bool
 	contractABI   abi.ABI
-	wgMainRoutine *sync.WaitGroup
-	wgDownload    *sync.WaitGroup
 }
 
 func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.BeaconDepositorsTransactionsConfig) (*BeaconDepositorsTransactions, error) {
@@ -73,28 +70,41 @@ func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.Beaco
 		ethClient:     elClient,
 		contractABI:   contractABI,
 		alchemyClient: alchemyClient,
-		wgMainRoutine: &sync.WaitGroup{},
-		wgDownload:    &sync.WaitGroup{},
+		routineClosed: make(chan struct{}),
 	}, nil
 }
 
 func (b *BeaconDepositorsTransactions) Run() {
 	defer b.cancel()
-	initTime := time.Now()
-	log.Info("Starting BeaconDepositorsTransactions")
-	b.wgDownload.Add(1)
-	go b.downloadBeaconDeposits()
 
-	b.wgDownload.Wait()
-	analysisDuration := time.Since(initTime).Seconds()
-	log.Info("BeaconDepositorsTransactions finished in ", analysisDuration)
-	b.stop = true
+	if !b.stop {
+		initTime := time.Now()
+		log.Info("Starting beacon_depositors_transactions...")
+		b.downloadBeaconDeposits()
+		analysisDuration := time.Since(initTime).Seconds()
+		log.Info("Finished beacon_depositors_transactions in ", analysisDuration)
+	}
+	b.CloseConnections()
+	log.Debug("Sending signal that beacon_depositors_transactions finished")
 	b.routineClosed <- struct{}{}
-
 }
 
-func (b *BeaconDepositorsTransactions) Close() {
-	log.Info("Sudden closed detected, closing BeaconDepositorsTransactions")
+func (b *BeaconDepositorsTransactions) Stop() {
+	log.Info("Closing beacon_depositors_transactions...")
 	b.stop = true
-	<-b.routineClosed // Wait for services to stop before returning
+	// Wait until the routine is closed
+	<-b.routineClosed
+	log.Info("Closed beacon_depositors_transactions")
+}
+
+func (b *BeaconDepositorsTransactions) CloseConnections() {
+	log.Debug("Closing Eth connection")
+	b.ethClient.Close()
+	log.Debug("Eth connection closed")
+	log.Debug("Closing Alchemy connection")
+	b.alchemyClient.Close()
+	log.Debug("Alchemy connection closed")
+	log.Debug("Closing DB connection")
+	b.dbClient.Finish()
+	log.Debug("DB connection closed")
 }

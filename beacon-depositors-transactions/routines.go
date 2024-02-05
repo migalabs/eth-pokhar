@@ -15,7 +15,6 @@ import (
 // }
 
 func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
-	defer b.wgDownload.Done()
 	firstCall := true
 
 	lastBlocknumProcessed := b.getDepositsCheckpoint()
@@ -31,6 +30,9 @@ func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 		alchemy.SetCategory([]string{"external", "internal"}),
 	)
 	for params.PageKey != "" || firstCall {
+		if b.stop {
+			return
+		}
 		newTransfers, newPageKey, err := b.alchemyClient.GetAssetTransfers(b.ctx, params)
 		if err != nil {
 			log.Fatal(err)
