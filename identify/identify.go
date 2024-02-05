@@ -35,7 +35,7 @@ func NewIdentify(pCtx context.Context, iConfig *config.IdentifyConfig) (*Identif
 		}, err
 	}
 
-	idbClient, err := db.New(ctx, iConfig.DBUrl, db.WithWorkers(iConfig.DBWorkers))
+	idbClient, err := db.New(ctx, iConfig.DBUrl)
 	if err != nil {
 		return &Identify{
 			ctx:    ctx,
