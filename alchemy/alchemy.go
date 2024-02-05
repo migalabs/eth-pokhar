@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/pkg/errors"
 )
 
 // Block tags: https://docs.alchemy.com/reference/transfers-api-quickstart#what-are-the-different-types-of-block-tags
 
 type AlchemyClient struct {
 	ctx       context.Context
+	rawurl    string
 	rpcClient *rpc.Client
 }
 
@@ -25,7 +27,26 @@ func NewAlchemyClient(ctx context.Context, rawurl string) (*AlchemyClient, error
 	return &AlchemyClient{
 		ctx:       ctx,
 		rpcClient: rpcClient,
+		rawurl:    rawurl,
 	}, nil
+}
+
+func (ac *AlchemyClient) Reconnect() error {
+	// Close the existing connection
+	if ac.rpcClient != nil {
+		ac.rpcClient.Close()
+	}
+
+	// Create a new connection
+	rpcClient, err := rpc.Dial(ac.rawurl)
+	if err != nil {
+		return err
+	}
+
+	// Replace the old client with the new one
+	ac.rpcClient = rpcClient
+
+	return nil
 }
 
 type GetAssetTransfersArgs struct {
@@ -173,16 +194,20 @@ func (ac *AlchemyClient) GetAllAssetTransfers(ctx context.Context, params *GetAs
 
 func (ac *AlchemyClient) GetAssetTransfers(ctx context.Context, params *GetAssetTransfersArgs) ([]AssetTransfer, string, error) {
 	var raw json.RawMessage
-
+	retry := 0
 	for {
 		err := ac.rpcClient.CallContext(ctx, &raw, "alchemy_getAssetTransfers", params)
 		if err != nil {
-			if strings.Contains(err.Error(), "429") {
-				waitTime := time.Duration(rand.Intn(250)+1000) * time.Millisecond
-				time.Sleep(waitTime)
-				continue
+			if !strings.Contains(err.Error(), "429") {
+				retry++
+				ac.Reconnect()
 			}
-			return nil, "", err
+			if retry > 5 {
+				return nil, "", errors.Wrap(err, "alchemy_getAssetTransfers failed after 5 retries")
+			}
+			waitTime := time.Duration(rand.Intn(250)+1000) * time.Millisecond
+			time.Sleep(waitTime)
+			continue
 		}
 		break
 	}
