@@ -82,7 +82,7 @@ func LaunchIdentify(c *cli.Context) error {
 	select {
 	case <-sigtermC:
 		logCmdIdentify.Info("Sudden shutdown detected, controlled shutdown of the cli triggered")
-		identifyRunner.Close()
+		identifyRunner.Stop()
 
 	case <-procDoneC:
 		logCmdIdentify.Info("Process successfully finished!")

@@ -2,7 +2,6 @@ package identify
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -21,7 +20,6 @@ type Identify struct {
 	routineClosed chan struct{} // signal that everything was closed succesfully
 	alchemyClient *alchemy.AlchemyClient
 	stop          bool
-	wgMainRoutine *sync.WaitGroup
 }
 
 func NewIdentify(pCtx context.Context, iConfig *config.IdentifyConfig) (*Identify, error) {
@@ -61,7 +59,6 @@ func NewIdentify(pCtx context.Context, iConfig *config.IdentifyConfig) (*Identif
 		ethClient:     elClient,
 		routineClosed: make(chan struct{}),
 		alchemyClient: alchemyClient,
-		wgMainRoutine: &sync.WaitGroup{},
 		stop:          false,
 	}, nil
 }
@@ -72,7 +69,7 @@ func (i *Identify) Run() {
 
 	log.Info("Starting Identify routine")
 
-	if i.iConfig.RecreateTable {
+	if i.iConfig.RecreateTable && !i.stop {
 		log.Info("Truncating identified validators table")
 		err := i.dbClient.TruncateIdentifiedValidators()
 		if err != nil {
@@ -81,45 +78,63 @@ func (i *Identify) Run() {
 		log.Info("Truncated identified validators")
 	}
 
-	log.Info("Adding new validators to database")
-	err := i.dbClient.AddNewValidators()
-	if err != nil {
-		log.Fatalf("Error adding new validators to database: %v", err)
+	if !i.stop {
+		log.Info("Adding new validators to database")
+		err := i.dbClient.AddNewValidators()
+		if err != nil {
+			log.Fatalf("Error adding new validators to database: %v", err)
+		}
+		log.Info("Added new validators to database")
 	}
-	log.Info("Added new validators to database")
 
-	log.Info("Applying validators insert")
-	err = i.dbClient.ApplyValidatorsInsert()
-	if err != nil {
-		log.Fatalf("Error applying validators insert: %v", err)
+	if !i.stop {
+		log.Info("Applying validators insert")
+		err := i.dbClient.ApplyValidatorsInsert()
+		if err != nil {
+			log.Fatalf("Error applying validators insert: %v", err)
+		}
+		log.Info("Applied validators insert")
 	}
-	log.Info("Applied validators insert")
-
-	log.Info("Applying deposits insert")
-	err = i.dbClient.ApplyDepositorsInsert()
-	if err != nil {
-		log.Fatalf("Error applying deposits insert: %v", err)
+	if !i.stop {
+		log.Info("Applying deposits insert")
+		err := i.dbClient.ApplyDepositorsInsert()
+		if err != nil {
+			log.Fatalf("Error applying deposits insert: %v", err)
+		}
+		log.Info("Applied deposits insert")
 	}
-	log.Info("Applied deposits insert")
 
-	log.Info("Identifying coinbase validators")
-	err = i.dbClient.IdentifyCoinbaseValidators()
-	if err != nil {
-		log.Fatalf("Error identifying coinbase validators: %v", err)
+	if !i.stop {
+		log.Info("Identifying coinbase validators")
+		err := i.dbClient.IdentifyCoinbaseValidators()
+		if err != nil {
+			log.Fatalf("Error identifying coinbase validators: %v", err)
+		}
+		log.Info("Identified coinbase validators")
 	}
-	log.Info("Identified coinbase validators")
-
 	endTime := time.Now()
 	log.Infof("Identify routine finished in %v", endTime.Sub(initTime))
-
-	i.stop = true
+	i.CloseConnections()
+	log.Debug("Sending signal that routine is closed")
 	i.routineClosed <- struct{}{}
 }
 
-func (i *Identify) Close() {
-	i.cancel()
-	i.ethClient.Close()
+func (i *Identify) Stop() {
+	log.Info("Closing identify...")
 	i.stop = true
-	log.Info("Identify closed")
+	// Wait until the routine is closed
 	<-i.routineClosed
+	log.Info("Closed identify")
+}
+
+func (i *Identify) CloseConnections() {
+	log.Debug("Closing Eth connection")
+	i.ethClient.Close()
+	log.Debug("Eth connection closed")
+	log.Debug("Closing Alchemy connection")
+	i.alchemyClient.Close()
+	log.Debug("Alchemy connection closed")
+	log.Debug("Closing DB connection")
+	i.dbClient.Finish()
+	log.Debug("DB connection closed")
 }
