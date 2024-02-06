@@ -3,11 +3,11 @@ package alchemy
 import (
 	"context"
 	"encoding/json"
-	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/migalabs/eth-pokhar/utils"
 	"github.com/pkg/errors"
 )
 
@@ -208,7 +208,7 @@ func (ac *AlchemyClient) GetAssetTransfers(ctx context.Context, params *GetAsset
 			if retry > 5 {
 				return nil, "", errors.Wrap(err, "alchemy_getAssetTransfers failed after 5 retries")
 			}
-			waitTime := time.Duration(rand.Intn(250)+1000) * time.Millisecond
+			waitTime := utils.GetRandomTimeout()
 			time.Sleep(waitTime)
 			continue
 		}
