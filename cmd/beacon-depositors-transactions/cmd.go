@@ -38,10 +38,10 @@ var BeaconDepositorsTransactionsCommand = &cli.Command{
 			DefaultText: "info",
 		},
 		&cli.IntFlag{
-			Name:        "db-workers-num",
-			Usage:       "Number of workers to process database operations",
-			EnvVars:     []string{"DB_WORKER_NUM"},
-			DefaultText: "4",
+			Name:        "workers-num",
+			Usage:       "Number of workers to process API requests",
+			EnvVars:     []string{"WORKER_NUM"},
+			DefaultText: "10",
 		},
 		&cli.StringFlag{
 			Name:        "alchemy-url",

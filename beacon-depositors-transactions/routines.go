@@ -25,25 +25,16 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 
 	log.Info("Fetching new transactions")
 
-	// Create a wait group to wait for all workers to finish
 	var wg sync.WaitGroup
 
-	// Create a channel to communicate with workers
 	checkpointsCh := make(chan models.DepositorCheckpoint)
 
-	// Define the number of workers in the thread pool
-	numWorkers := 15
-
-	// Start the workers
-	for i := 0; i < numWorkers; i++ {
+	for i := 0; i < b.iConfig.Workers; i++ {
 		wg.Add(1)
 		go b.workerFetchTransactions(&wg, checkpointsCh)
 	}
-
-	// Calculate total number of checkpoints
 	totalCheckpoints := len(checkpoints)
 
-	// Create a counter to keep track of processed checkpoints
 	checkpointsProcessed := 0
 
 	// Log progress and ETA every 1 minute
@@ -67,7 +58,6 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 		}
 	}()
 
-	// Send checkpoints to workers for processing
 	for _, checkpoint := range checkpoints {
 		if b.stop {
 			return
@@ -76,10 +66,8 @@ func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 		checkpointsProcessed++
 	}
 
-	// Close the channel to signal that no more transactions will be sent
 	close(checkpointsCh)
 
-	// Wait for all workers to finish
 	wg.Wait()
 
 	log.Info("All transactions fetched")
@@ -115,7 +103,7 @@ func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 		log.Debugf("Downloaded 1000 more deposits on block %d", num)
 		params.PageKey = newPageKey
 		firstCall = false
-		err = b.processDepositTransfers(newTransfers, 15)
+		err = b.processDepositTransfers(newTransfers, b.iConfig.Workers)
 		if err != nil {
 			log.Fatalf("Error processing deposit transfers: %s", err.Error())
 		}
