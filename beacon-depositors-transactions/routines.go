@@ -44,7 +44,7 @@ func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 		log.Debugf("Downloaded 1000 more deposits on block %d", num)
 		params.PageKey = newPageKey
 		firstCall = false
-		err = b.processDepositTransfers(newTransfers, 10)
+		err = b.processDepositTransfers(newTransfers, b.iConfig.Workers)
 		if err != nil {
 			log.Fatal(err)
 		}
