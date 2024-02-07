@@ -34,6 +34,7 @@ func (b *BeaconDepositorsTransactions) fetchNewTransactions(depositorCheckpoint 
 		alchemy.SetToAddress("0x"+depositorCheckpoint.Depositor),
 		alchemy.SetFromBlock(fromBlock),
 		alchemy.SetCategory([]string{"external"}),
+		alchemy.SetExcludeZeroValue(false),
 	)
 
 	toTransfers, err := b.alchemyClient.GetAllAssetTransfers(b.ctx, params)
@@ -46,6 +47,7 @@ func (b *BeaconDepositorsTransactions) fetchNewTransactions(depositorCheckpoint 
 		alchemy.SetFromAddress("0x"+depositorCheckpoint.Depositor),
 		alchemy.SetFromBlock(fromBlock),
 		alchemy.SetCategory([]string{"external"}),
+		alchemy.SetExcludeZeroValue(false),
 	)
 	fromTransfers, err := b.alchemyClient.GetAllAssetTransfers(b.ctx, params)
 	if err != nil {
