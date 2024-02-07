@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -61,34 +62,52 @@ func (i *Identify) GetRocketPoolKeys() ([]string, error) {
 		"LastAddressSavedIndex": lastAddressSavedIndex,
 	}).Debug("Last address saved index")
 	// Get the validator pubkey for each minipool
+	var wg sync.WaitGroup
+	minipoolKeysCh := make(chan string, len(minipools))
+	maxWorkers := 10
+	workerSemaphore := make(chan struct{}, maxWorkers)
 
 	for i := 0; i < len(minipools); i++ {
-		retry := 0
-		for {
-			minipoolAddress := minipools[i]
-			log.WithFields(log.Fields{
-				"MinipoolAddress": minipoolAddress.Hex(),
-			}).Debug("Getting minipool pubkey")
+		wg.Add(1)
+		workerSemaphore <- struct{}{}
+		go func(minipoolAddress common.Address) {
+			defer wg.Done()
 
-			pubkey, err := getMiniPoolPubkey(rp, minipoolAddress)
-			if err != nil {
-				if !strings.Contains(err.Error(), "429") {
-					retry++
+			retry := 0
+			for {
+				pubkey, err := getMiniPoolPubkey(rp, minipoolAddress)
+				if err != nil {
+					if !strings.Contains(err.Error(), "429") {
+						retry++
+					}
+					if retry > 5 {
+						log.WithFields(log.Fields{
+							"MinipoolAddress": minipoolAddress.Hex(),
+						}).Error("Could not get minipool info")
+						return
+					}
+					waitTime := utils.GetRandomTimeout()
+					time.Sleep(waitTime)
+					continue
 				}
-				if retry > 5 {
-					return nil, errors.Wrap(err, fmt.Sprintf("could not get minipool info: %s", minipoolAddress.Hex()))
-				}
-				waitTime := utils.GetRandomTimeout()
-				time.Sleep(waitTime)
-				continue
+				log.WithFields(log.Fields{
+					"Pubkey": hex.EncodeToString(pubkey),
+				}).Debug("Got minipool pubkey")
+
+				minipoolKeysCh <- hex.EncodeToString(pubkey)
+				break
 			}
-			log.WithFields(log.Fields{
-				"Pubkey": hex.EncodeToString(pubkey),
-			}).Debug("Got minipool pubkey")
+			<-workerSemaphore
+		}(minipools[i])
+	}
 
-			rocketpoolKeys = append(rocketpoolKeys, "\\x"+hex.EncodeToString(pubkey))
-			break
-		}
+	go func() {
+		wg.Wait()
+		close(minipoolKeysCh)
+	}()
+
+	for key := range minipoolKeysCh {
+		rocketpoolKeys = append(rocketpoolKeys, key)
 	}
 
 	return rocketpoolKeys, nil
