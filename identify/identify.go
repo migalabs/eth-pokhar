@@ -57,7 +57,7 @@ func NewIdentify(pCtx context.Context, iConfig *config.IdentifyConfig) (*Identif
 		iConfig:       iConfig,
 		dbClient:      idbClient,
 		ethClient:     elClient,
-		routineClosed: make(chan struct{}),
+		routineClosed: make(chan struct{}, 1),
 		alchemyClient: alchemyClient,
 		stop:          false,
 	}, nil
@@ -96,12 +96,12 @@ func (i *Identify) Run() {
 		log.Info("Applied validators insert")
 	}
 	if !i.stop {
-		log.Info("Applying deposits insert")
+		log.Info("Applying depositors insert")
 		err := i.dbClient.ApplyDepositorsInsert()
 		if err != nil {
-			log.Fatalf("Error applying deposits insert: %v", err)
+			log.Fatalf("Error applying depositors insert: %v", err)
 		}
-		log.Info("Applied deposits insert")
+		log.Info("Applied depositors insert")
 	}
 
 	if !i.stop {

@@ -58,9 +58,18 @@ const (
 )
 
 func (p *PostgresDBService) IdentifyCoinbaseValidators() error {
-	_, err := p.psqlPool.Query(p.ctx, identifyCoinbaseValidatorsQuery)
+	p.writerThreadsWG.Add(1)
+	defer p.writerThreadsWG.Done()
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return errors.Wrap(err, "error acquiring connection")
+	}
+	defer conn.Release()
+
+	_, err = conn.Query(p.ctx, identifyCoinbaseValidatorsQuery)
 	if err != nil {
 		return errors.Wrap(err, "error identifying coinbase validators")
 	}
+
 	return nil
 }
