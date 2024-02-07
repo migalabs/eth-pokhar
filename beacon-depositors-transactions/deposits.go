@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/migalabs/eth-pokhar/alchemy"
 	"github.com/migalabs/eth-pokhar/models"
+	"github.com/migalabs/eth-pokhar/utils"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -69,7 +70,7 @@ func (b *BeaconDepositorsTransactions) processDepositTransfers(transfers []alche
 								continue
 							}
 							pubkey := hex.EncodeToString(event["pubkey"].([]byte))
-							blockNum, err := strconv.ParseUint(strings.TrimPrefix(transfer.BlockNum, "0x"), 16, 64)
+							blockNum, err := strconv.ParseUint(strings.TrimPrefix(transfer.BlockNum, utils.AddressPrefix), 16, 64)
 							if err != nil {
 								logger.Errorf("Error parsing block number: %s", err.Error())
 								errCh <- err
@@ -77,8 +78,8 @@ func (b *BeaconDepositorsTransactions) processDepositTransfers(transfers []alche
 							}
 							deposit := models.BeaconDeposit{
 								BlockNum:        blockNum,
-								Depositor:       strings.TrimPrefix(transfer.From, "0x"),
-								TxHash:          strings.TrimPrefix(txHash.String(), "0x"),
+								Depositor:       strings.TrimPrefix(transfer.From, utils.AddressPrefix),
+								TxHash:          strings.TrimPrefix(txHash.String(), utils.AddressPrefix),
 								ValidatorPubkey: pubkey,
 							}
 							depositsCh <- deposit

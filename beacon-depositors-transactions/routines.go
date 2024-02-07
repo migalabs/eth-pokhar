@@ -82,7 +82,7 @@ func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 	if lastBlocknumProcessed > 1000 {
 		startBlock = lastBlocknumProcessed - 1000
 	}
-	lastBlocknumProcessedHex := "0x" + strconv.FormatUint(startBlock, 16)
+	lastBlocknumProcessedHex := utils.AddressPrefix + strconv.FormatUint(startBlock, 16)
 	params := alchemy.NewGetAssetTransfersArgs(
 		alchemy.SetToAddress(utils.BeaconContractAddress),
 		alchemy.SetFromBlock(lastBlocknumProcessedHex),
@@ -96,7 +96,7 @@ func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 		if err != nil {
 			log.Fatalf("Error getting asset transfers: %s", err.Error())
 		}
-		num, err := strconv.ParseUint(strings.TrimPrefix(newTransfers[0].BlockNum, "0x"), 16, 64)
+		num, err := strconv.ParseUint(strings.TrimPrefix(newTransfers[0].BlockNum, utils.AddressPrefix), 16, 64)
 		if err != nil {
 			log.Fatalf("Error parsing block number: %s", err.Error())
 		}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/migalabs/eth-pokhar/alchemy"
 	"github.com/migalabs/eth-pokhar/models"
+	"github.com/migalabs/eth-pokhar/utils"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -28,10 +29,10 @@ func (b *BeaconDepositorsTransactions) workerFetchTransactions(wg *sync.WaitGrou
 }
 
 func (b *BeaconDepositorsTransactions) fetchNewTransactions(depositorCheckpoint models.DepositorCheckpoint) ([]models.Transaction, error) {
-	fromBlock := "0x" + strconv.FormatUint(depositorCheckpoint.Checkpoint+1, 16)
+	fromBlock := utils.AddressPrefix + strconv.FormatUint(depositorCheckpoint.Checkpoint+1, 16)
 	newTransfers := make([]alchemy.AssetTransfer, 0)
 	params := alchemy.NewGetAssetTransfersArgs(
-		alchemy.SetToAddress("0x"+depositorCheckpoint.Depositor),
+		alchemy.SetToAddress(utils.AddressPrefix+depositorCheckpoint.Depositor),
 		alchemy.SetFromBlock(fromBlock),
 		alchemy.SetCategory([]string{"external"}),
 		alchemy.SetExcludeZeroValue(false),
@@ -44,7 +45,7 @@ func (b *BeaconDepositorsTransactions) fetchNewTransactions(depositorCheckpoint 
 	newTransfers = append(newTransfers, toTransfers...)
 
 	params = alchemy.NewGetAssetTransfersArgs(
-		alchemy.SetFromAddress("0x"+depositorCheckpoint.Depositor),
+		alchemy.SetFromAddress(utils.AddressPrefix+depositorCheckpoint.Depositor),
 		alchemy.SetFromBlock(fromBlock),
 		alchemy.SetCategory([]string{"external"}),
 		alchemy.SetExcludeZeroValue(false),
@@ -67,6 +68,8 @@ func transfersToTransactions(transfers []alchemy.AssetTransfer, depositor string
 			continue
 		}
 		transactionsMap[transfer.Hash] = true
+
+		// Some of the fields are sometimes empty (edgy case). This avoids panics
 		from := transfer.From
 		if len(from) > 2 {
 			from = transfer.From[2:]
