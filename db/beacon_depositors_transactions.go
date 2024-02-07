@@ -17,20 +17,7 @@ import (
 
 // Postgres intregration variables
 var (
-	upsertTransaction = `
-	INSERT INTO t_beacon_depositors_transactions (
-		f_block_num,
-		f_value,
-		f_from,
-		f_to,
-		f_tx_hash,
-		f_depositor)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT ON CONSTRAINT t_beacon_depositors_transactions_pkey
-			DO NOTHING;
-	`
-
-	SelectCheckpointPerDepositor = `
+	selectCheckpointPerDepositor = `
 	WITH max_block_per_depositor AS (
 		select f_depositor, MAX(f_block_num) f_max_block_num
 		from t_beacon_depositors_transactions
@@ -44,19 +31,8 @@ var (
 	`
 )
 
-func insertTransaction(inputTransaction models.Transaction) (string, []interface{}) {
-	resultArgs := make([]interface{}, 0)
-	resultArgs = append(resultArgs, inputTransaction.BlockNum)
-	resultArgs = append(resultArgs, inputTransaction.Value)
-	resultArgs = append(resultArgs, inputTransaction.From)
-	resultArgs = append(resultArgs, inputTransaction.To)
-	resultArgs = append(resultArgs, inputTransaction.TxHash)
-	resultArgs = append(resultArgs, inputTransaction.Depositor)
-	return upsertTransaction, resultArgs
-}
-
 func (p *PostgresDBService) ObtainCheckpointPerDepositor() ([]models.DepositorCheckpoint, error) {
-	rows, err := p.psqlPool.Query(p.ctx, SelectCheckpointPerDepositor)
+	rows, err := p.psqlPool.Query(p.ctx, selectCheckpointPerDepositor)
 	if err != nil {
 		rows.Close()
 		return nil, err
@@ -73,11 +49,6 @@ func (p *PostgresDBService) ObtainCheckpointPerDepositor() ([]models.DepositorCh
 		checkpoints = append(checkpoints, checkpoint)
 	}
 	return checkpoints, nil
-}
-
-func TransactionOperation(inputTransaction models.Transaction) (string, []interface{}) {
-	q, args := insertTransaction(inputTransaction)
-	return q, args
 }
 
 func (p *PostgresDBService) CopyTransactions(rowSrc []models.Transaction) int64 {
