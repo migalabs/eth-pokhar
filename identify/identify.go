@@ -57,7 +57,7 @@ func NewIdentify(pCtx context.Context, iConfig *config.IdentifyConfig) (*Identif
 		iConfig:       iConfig,
 		dbClient:      idbClient,
 		ethClient:     elClient,
-		routineClosed: make(chan struct{}),
+		routineClosed: make(chan struct{}, 1),
 		alchemyClient: alchemyClient,
 		stop:          false,
 	}, nil
