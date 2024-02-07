@@ -96,12 +96,12 @@ func (i *Identify) Run() {
 		log.Info("Applied validators insert")
 	}
 	if !i.stop {
-		log.Info("Applying deposits insert")
+		log.Info("Applying depositors insert")
 		err := i.dbClient.ApplyDepositorsInsert()
 		if err != nil {
-			log.Fatalf("Error applying deposits insert: %v", err)
+			log.Fatalf("Error applying depositors insert: %v", err)
 		}
-		log.Info("Applied deposits insert")
+		log.Info("Applied depositors insert")
 	}
 
 	if !i.stop {
