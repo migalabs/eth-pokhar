@@ -25,7 +25,13 @@ const (
 
 // IdentifyRocketpoolValidators identifies the rocketpool validators and adds them to the identified validators table
 func (p *PostgresDBService) IdentifyRocketpoolValidators() error {
-	_, err := p.psqlPool.Query(p.ctx, identifyRocketpoolValidators)
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return errors.Wrap(err, "error acquiring database connection")
+	}
+	defer conn.Release()
+
+	_, err = conn.Query(p.ctx, identifyRocketpoolValidators)
 	if err != nil {
 		return errors.Wrap(err, "error identifying rocketpool validators")
 	}
@@ -34,8 +40,14 @@ func (p *PostgresDBService) IdentifyRocketpoolValidators() error {
 
 // ObtainRocketpoolValidatorCount returns the number of validators in the database
 func (p *PostgresDBService) ObtainRocketpoolValidatorCount() (int, error) {
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return 0, errors.Wrap(err, "error acquiring database connection")
+	}
+	defer conn.Release()
+
 	var count int
-	err := p.psqlPool.QueryRow(p.ctx, selectValidatorCount).Scan(&count)
+	err = conn.QueryRow(p.ctx, selectValidatorCount).Scan(&count)
 	if err != nil {
 		return 0, errors.Wrap(err, "error obtaining validator count from database")
 	}
@@ -62,8 +74,15 @@ func (p *PostgresDBService) CopyRocketpoolValidators(rowSrc []string) int64 {
 		validators = append(validators, []interface{}{row})
 	}
 
+	// Acquire a database connection
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return 0
+	}
+	defer conn.Release()
+
 	// Create a temporary table with a unique constraint
-	_, err := p.psqlPool.Exec(p.ctx, `
+	_, err = conn.Exec(p.ctx, `
 		CREATE TEMP TABLE IF NOT EXISTS `+tempTableName+` (
 			f_validator_pubkey text
 		);
@@ -73,13 +92,13 @@ func (p *PostgresDBService) CopyRocketpoolValidators(rowSrc []string) int64 {
 	}
 
 	// Copy the data to the temporary table
-	_, err = p.psqlPool.CopyFrom(p.ctx, pgx.Identifier{tempTableName}, []string{"f_validator_pubkey"}, pgx.CopyFromRows(validators))
+	_, err = conn.CopyFrom(p.ctx, pgx.Identifier{tempTableName}, []string{"f_validator_pubkey"}, pgx.CopyFromRows(validators))
 	if err != nil {
 		return 0
 	}
 
 	// Insert the data from the temporary table to the main table
-	count, err := p.psqlPool.Exec(p.ctx, `
+	count, err := conn.Exec(p.ctx, `
 		INSERT INTO t_rocketpool (f_validator_pubkey)
 		SELECT f_validator_pubkey
 		FROM `+tempTableName+`
@@ -90,7 +109,7 @@ func (p *PostgresDBService) CopyRocketpoolValidators(rowSrc []string) int64 {
 	}
 
 	// Drop the temporary table
-	_, err = p.psqlPool.Exec(p.ctx, `DROP TABLE `+tempTableName+`;`)
+	_, err = conn.Exec(p.ctx, `DROP TABLE `+tempTableName+`;`)
 	if err != nil {
 		return 0
 	}
