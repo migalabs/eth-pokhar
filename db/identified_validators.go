@@ -16,7 +16,15 @@ const (
 )
 
 func (p *PostgresDBService) AddNewValidators() error {
-	_, err := p.psqlPool.Query(p.ctx, addNewValidatorsQuery)
+	p.writerThreadsWG.Add(1)
+	defer p.writerThreadsWG.Done()
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return errors.Wrap(err, "error acquiring connection from pool")
+	}
+	defer conn.Release()
+
+	_, err = conn.Exec(p.ctx, addNewValidatorsQuery)
 	if err != nil {
 		return errors.Wrap(err, "error adding new validators to database")
 	}
@@ -24,7 +32,15 @@ func (p *PostgresDBService) AddNewValidators() error {
 }
 
 func (p *PostgresDBService) TruncateIdentifiedValidators() error {
-	_, err := p.psqlPool.Query(p.ctx, tuncateIdentifiedValidatorsQuery)
+	p.writerThreadsWG.Add(1)
+	defer p.writerThreadsWG.Done()
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return errors.Wrap(err, "error acquiring connection from pool")
+	}
+	defer conn.Release()
+
+	_, err = conn.Exec(p.ctx, tuncateIdentifiedValidatorsQuery)
 	if err != nil {
 		return errors.Wrap(err, "error truncating identified validators")
 	}

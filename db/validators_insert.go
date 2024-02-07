@@ -18,7 +18,15 @@ const (
 )
 
 func (p *PostgresDBService) ApplyValidatorsInsert() error {
-	_, err := p.psqlPool.Query(p.ctx, applyValidatorsInsertQuery)
+	p.writerThreadsWG.Add(1)
+	defer p.writerThreadsWG.Done()
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return errors.Wrap(err, "error acquiring connection")
+	}
+	defer conn.Release()
+
+	_, err = conn.Query(p.ctx, applyValidatorsInsertQuery)
 	if err != nil {
 		return errors.Wrap(err, "error applying validators insert")
 	}
