@@ -66,6 +66,8 @@ func transfersToTransactions(transfers []alchemy.AssetTransfer, depositor string
 			continue
 		}
 		transactionsMap[transfer.Hash] = true
+
+		// Some of the fields are sometimes empty (edgy case). This avoids panics
 		from := transfer.From
 		if len(from) > 2 {
 			from = transfer.From[2:]
