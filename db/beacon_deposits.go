@@ -32,13 +32,16 @@ func (p *PostgresDBService) ObtainLastDeposit() (models.BeaconDeposit, error) {
 	rows.Next()
 	err = rows.Scan(&deposit.BlockNum, &deposit.Depositor, &deposit.TxHash, &deposit.ValidatorPubkey)
 	if err != nil {
-		log.Error(err)
+		log.Errorf("error scanning last deposit: %s", err.Error())
 	}
 	rows.Close()
 	return deposit, nil
 }
 
 func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) int64 {
+	if len(rowSrc) == 0 {
+		return 0
+	}
 	p.writerThreadsWG.Add(1)
 	defer p.writerThreadsWG.Done()
 	startTime := time.Now()
@@ -91,8 +94,10 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 	if err != nil {
 		wlog.Fatalf("could not drop temporary table: %s", err.Error())
 	}
+	if count.RowsAffected() > 0 {
+		wlog.Debugf("persisted %d rows in %f seconds", count.RowsAffected(), time.Since(startTime).Seconds())
+	}
 
-	wlog.Infof("persisted %d rows in %f seconds", count.RowsAffected(), time.Since(startTime).Seconds())
 	return count.RowsAffected()
 }
 

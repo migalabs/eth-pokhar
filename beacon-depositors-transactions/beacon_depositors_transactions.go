@@ -3,6 +3,7 @@ package beacondepositorstransactions
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -16,15 +17,16 @@ import (
 )
 
 type BeaconDepositorsTransactions struct {
-	ctx           context.Context
-	cancel        context.CancelFunc
-	iConfig       *config.BeaconDepositorsTransactionsConfig
-	dbClient      *db.PostgresDBService // client to communicate with psql
-	ethClient     *ethclient.Client
-	routineClosed chan struct{} // signal that everything was closed succesfully
-	alchemyClient *alchemy.AlchemyClient
-	stop          bool
-	contractABI   abi.ABI
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	iConfig              *config.BeaconDepositorsTransactionsConfig
+	dbClient             *db.PostgresDBService // client to communicate with psql
+	ethClient            *ethclient.Client
+	routineClosed        chan struct{} // signal that everything was closed succesfully
+	alchemyClient        *alchemy.AlchemyClient
+	stop                 bool
+	contractABI          abi.ABI
+	checkpointsProcessed *atomic.Uint64
 }
 
 func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.BeaconDepositorsTransactionsConfig) (*BeaconDepositorsTransactions, error) {
@@ -59,31 +61,44 @@ func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.Beaco
 
 	contractABI, err := abi.JSON(strings.NewReader(string(utils.BeaconchainABI)))
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error parsing ABI: %v", err)
 	}
 
 	return &BeaconDepositorsTransactions{
-		ctx:           ctx,
-		cancel:        cancel,
-		iConfig:       iConfig,
-		dbClient:      idbClient,
-		ethClient:     elClient,
-		contractABI:   contractABI,
-		alchemyClient: alchemyClient,
-		routineClosed: make(chan struct{}),
+		ctx:                  ctx,
+		cancel:               cancel,
+		iConfig:              iConfig,
+		dbClient:             idbClient,
+		ethClient:            elClient,
+		contractABI:          contractABI,
+		alchemyClient:        alchemyClient,
+		routineClosed:        make(chan struct{}),
+		checkpointsProcessed: &atomic.Uint64{},
 	}, nil
 }
 
 func (b *BeaconDepositorsTransactions) Run() {
 	defer b.cancel()
-
+	log.Info("Starting beacon_depositors_transactions...")
+	totalInitTime := time.Now()
 	if !b.stop {
 		initTime := time.Now()
-		log.Info("Starting beacon_depositors_transactions...")
+		log.Info("Downloading new beacon deposits...")
 		b.downloadBeaconDeposits()
-		analysisDuration := time.Since(initTime).Seconds()
-		log.Info("Finished beacon_depositors_transactions in ", analysisDuration)
+		duration := time.Since(initTime).Seconds()
+		log.Info("Finished downloading new beacon deposits in ", duration)
+
 	}
+	if !b.stop {
+		initTime := time.Now()
+		log.Info("Updating depositors transactions...")
+		b.updateDepositorsTransactions()
+		duration := time.Since(initTime).Seconds()
+		log.Info("Finished updating depositors transactions in ", duration)
+	}
+	totalDuration := time.Since(totalInitTime).Seconds()
+	log.Info("Finished beacon_depositors_transactions in ", totalDuration)
+
 	b.CloseConnections()
 	log.Debug("Sending signal that beacon_depositors_transactions finished")
 	b.routineClosed <- struct{}{}
