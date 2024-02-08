@@ -56,6 +56,8 @@ var definedOperatorsNames = []string{
 	"rockawayx_lido",    // 38
 }
 
+const maxBatchSize = 100
+
 func (i *Identify) IdentifyLidoValidators() error {
 	log.Debug("Creating a new instance of LidoContract")
 
@@ -91,29 +93,46 @@ func (i *Identify) IdentifyLidoValidators() error {
 		if operator.Index < uint64(len(operatorsValidatorCount)) {
 			operatorValidatorCount = operatorsValidatorCount[operator.Index]
 		}
+
 		var operatorName string
 		if operator.Index < uint64(len(definedOperatorsNames)) {
 			operatorName = definedOperatorsNames[operator.Index]
 		} else {
 			operatorName = formatOperatorName(operator.Name)
 		}
-		log.Debugf("Getting new keys for operator %v", operatorName)
-		validatorPubkeys := make([]string, operator.TotalSigningKeys-operatorValidatorCount)
+		log.Infof("Getting new keys for operator %v", operatorName)
+		if operator.TotalSigningKeys-operatorValidatorCount == 0 {
+			log.Infof("No new keys for operator %v", operatorName)
+			continue
+		}
+		remainingKeys := operator.TotalSigningKeys - operatorValidatorCount
+		var validatorPubkeys []string
+		var batchSize uint64
+		var batchIndex uint64
 		for keyIndex := operatorValidatorCount; keyIndex < operator.TotalSigningKeys; keyIndex++ {
+			if validatorPubkeys == nil {
+				batchIndex = 0
+				batchSize = min(remainingKeys, maxBatchSize)
+				validatorPubkeys = make([]string, batchSize)
+			}
+
 			key, err := lidoContract.GetOperatorKey(operator, keyIndex)
 			if err != nil {
 				return err
 			}
-			validatorPubkeys[keyIndex-operatorValidatorCount] = hex.EncodeToString(key.Key)
+			validatorPubkeys[batchIndex] = hex.EncodeToString(key.Key)
+			isLastKey := keyIndex == operator.TotalSigningKeys-1
+			remainingKeys--
+			if batchIndex == batchSize-1 || isLastKey {
+				log.Debugf("Inserting %v keys for operator %v into the database", batchSize, operatorName)
+				count := i.dbClient.CopyLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys)
+				log.Debugf("Inserted %v validators for operator %v. %v remaining", count, operatorName, remainingKeys)
+				validatorPubkeys = nil
+			} else {
+				batchIndex++
+			}
 		}
-		if len(validatorPubkeys) == 0 {
-			log.Debugf("No new keys for operator %v", operatorName)
-			continue
-		}
-		log.Debugf("Got %v new keys for operator %v", len(validatorPubkeys), operatorName)
-		log.Debugf("Inserting new keys for operator %v into the database", operatorName)
-		count := i.dbClient.CopyLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys)
-		log.Debugf("Inserted %v validators for operator %v", count, operatorName)
+		log.Infof("Got %v new keys for operator %v", operator.TotalSigningKeys-operatorValidatorCount, operatorName)
 	}
 	log.Debug("Finished getting keys for each operator")
 
