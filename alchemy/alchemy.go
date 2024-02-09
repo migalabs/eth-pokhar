@@ -205,7 +205,7 @@ func (ac *AlchemyClient) GetAssetTransfers(ctx context.Context, params *GetAsset
 				retry++
 				ac.Reconnect()
 			}
-			if retry > 5 {
+			if retry > utils.MaxRetries {
 				return nil, "", errors.Wrap(err, "alchemy_getAssetTransfers failed after 5 retries")
 			}
 			waitTime := utils.GetRandomTimeout()
