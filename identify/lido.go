@@ -2,6 +2,7 @@ package identify
 
 import (
 	"encoding/hex"
+	"math/big"
 	"strings"
 	"sync"
 
@@ -75,26 +76,23 @@ func (i *Identify) IdentifyLidoValidators() error {
 	log.Debug("Created a new instance of LidoContract")
 
 	log.Debug("Calling the GetOperatorsIndexes function")
-	operatorsIndexes, err := lidoContract.GetOperatorsIndexes()
+	operatorsCount, err := lidoContract.GetNodeOperatorsCount()
 	if err != nil {
 		return err
 	}
-	log.Debugf("Got indexes: %v", operatorsIndexes)
-
-	log.Debug("Calling the GetOperatorsData function")
-	operatorsData, err := lidoContract.GetOperatorsData(operatorsIndexes)
-	if err != nil {
-		return err
-	}
-	log.Debug("Got operatorsData")
+	log.Debugf("Found %v operators", operatorsCount)
 
 	log.Debug("Getting keys for each operator")
 	workerSemaphore := make(chan struct{}, 10)
 	var wg sync.WaitGroup
 
-	for _, operator := range operatorsData {
+	for operatorIndex := int64(0); operatorIndex < operatorsCount; operatorIndex++ {
 		wg.Add(1)
 		workerSemaphore <- struct{}{}
+		operator, err := lidoContract.GetOperatorData(big.NewInt(operatorIndex))
+		if err != nil {
+			return err
+		}
 
 		operatorValidatorCount := uint64(0)
 		if operator.Index < uint64(len(operatorsValidatorCount)) {
@@ -109,6 +107,7 @@ func (i *Identify) IdentifyLidoValidators() error {
 	log.Debug("Finished getting keys for each operator")
 
 	wg.Wait()
+
 	return nil
 }
 

@@ -33,7 +33,7 @@ func NewLidoContract(nodeEndpoint string) (*LidoContract, error) {
 	return &LidoContract{contract: contract, address: NODE_OPS_ADDRESS}, nil
 }
 
-func (l *LidoContract) GetOperatorsIndexes() ([]*big.Int, error) {
+func (l *LidoContract) GetNodeOperatorsCount() (int64, error) {
 	retry := 0
 	var operatorsCount *big.Int
 	var err error
@@ -44,7 +44,7 @@ func (l *LidoContract) GetOperatorsIndexes() ([]*big.Int, error) {
 				retry++
 			}
 			if retry > 5 {
-				return nil, errors.Wrap(err, "error getting operators count")
+				return 0, errors.Wrap(err, "error getting operators count")
 			}
 			waitTime := utils.GetRandomTimeout()
 			time.Sleep(waitTime)
@@ -52,46 +52,37 @@ func (l *LidoContract) GetOperatorsIndexes() ([]*big.Int, error) {
 		}
 		break
 	}
-	operatorsIndexes := make([]*big.Int, operatorsCount.Int64())
-	for i := 0; i < int(operatorsCount.Int64()); i++ {
-		operatorsIndexes[i] = big.NewInt(int64(i))
-	}
-	return operatorsIndexes, nil
+
+	return operatorsCount.Int64(), nil
 }
 
-func (l *LidoContract) GetOperatorsData(indexes []*big.Int) ([]NodeOperator, error) {
-	operators := make([]NodeOperator, len(indexes))
-	for i, index := range indexes {
-		retry := 0
-		for {
-			operator, err := l.contract.GetNodeOperator(nil, index, true)
-			if err != nil {
-				if !strings.Contains(err.Error(), "429") {
-					retry++
-				}
-				if retry > 5 {
-					return nil, errors.Wrap(err, "error getting operators count")
-				}
-				waitTime := utils.GetRandomTimeout()
-				time.Sleep(waitTime)
-				continue
+func (l *LidoContract) GetOperatorData(index *big.Int) (NodeOperator, error) {
+	retry := 0
+	for {
+		operator, err := l.contract.GetNodeOperator(nil, index, true)
+		if err != nil {
+			if !strings.Contains(err.Error(), "429") {
+				retry++
 			}
-			operators[i] = NodeOperator{
-				Index:             index.Uint64(),
-				Active:            operator.Active,
-				Name:              operator.Name,
-				RewardAddress:     operator.RewardAddress,
-				StakingLimit:      operator.StakingLimit,
-				StoppedValidators: operator.StoppedValidators,
-				TotalSigningKeys:  operator.TotalSigningKeys,
-				UsedSigningKeys:   operator.UsedSigningKeys,
+			if retry > 5 {
+				return NodeOperator{}, errors.Wrap(err, "error getting operators count")
 			}
-
-			break
+			waitTime := utils.GetRandomTimeout()
+			time.Sleep(waitTime)
+			continue
 		}
-
+		return NodeOperator{
+			Index:             index.Uint64(),
+			Active:            operator.Active,
+			Name:              operator.Name,
+			RewardAddress:     operator.RewardAddress,
+			StakingLimit:      operator.StakingLimit,
+			StoppedValidators: operator.StoppedValidators,
+			TotalSigningKeys:  operator.TotalSigningKeys,
+			UsedSigningKeys:   operator.UsedSigningKeys,
+		}, nil
 	}
-	return operators, nil
+
 }
 
 func (l *LidoContract) GetOperatorKey(operator NodeOperator, keyIndex uint64) (OperatorKey, error) {
