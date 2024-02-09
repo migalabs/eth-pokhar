@@ -64,8 +64,7 @@ func (i *Identify) GetRocketPoolKeys() ([]string, error) {
 	// Get the validator pubkey for each minipool
 	var wg sync.WaitGroup
 	minipoolKeysCh := make(chan string, len(minipools))
-	maxWorkers := 10
-	workerSemaphore := make(chan struct{}, maxWorkers)
+	workerSemaphore := make(chan struct{}, i.iConfig.Workers)
 
 	for i := 0; i < len(minipools); i++ {
 		wg.Add(1)
