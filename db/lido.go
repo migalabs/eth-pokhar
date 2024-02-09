@@ -16,7 +16,32 @@ const (
 	GROUP BY f_operator_index
 	ORDER BY f_operator_index ASC;
 	`
+
+	identifyLidoValidators = `
+	UPDATE t_identified_validators 
+	SET f_pool_name = t_lido.f_operator
+	FROM t_lido
+	WHERE t_identified_validators.f_validator_pubkey = t_lido.f_validator_pubkey;
+	`
 )
+
+// IdentifyLidoValidators identifies the lido validators and adds them to the identified validators table
+func (p *PostgresDBService) IdentifyLidoValidators() error {
+	p.writerThreadsWG.Add(1)
+	defer p.writerThreadsWG.Done()
+
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return errors.Wrap(err, "error acquiring database connection")
+	}
+	defer conn.Release()
+
+	_, err = conn.Query(p.ctx, identifyLidoValidators)
+	if err != nil {
+		return errors.Wrap(err, "error identifying lido validators")
+	}
+	return nil
+}
 
 // Obtain LidoOperatorsValidatorCount returns the number of validators in the Lido table for each operator
 func (p *PostgresDBService) ObtainLidoOperatorsValidatorCount() ([]uint64, error) {

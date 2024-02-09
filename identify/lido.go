@@ -108,6 +108,13 @@ func (i *Identify) IdentifyLidoValidators() error {
 
 	wg.Wait()
 
+	log.Debug("Identifying lido validators")
+	err = i.dbClient.IdentifyLidoValidators()
+	if err != nil {
+		return err
+	}
+	log.Debug("Identified lido validators")
+
 	return nil
 }
 
