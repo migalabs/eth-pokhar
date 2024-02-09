@@ -10,7 +10,7 @@ const (
 		WHERE F_VALIDATOR_PUBKEY != ''
 		ON CONFLICT (f_validator_pubkey) DO NOTHING;
 	`
-	tuncateIdentifiedValidatorsQuery = `
+	truncateIdentifiedValidatorsQuery = `
 		TRUNCATE TABLE t_identified_validators;
 	`
 )
@@ -40,7 +40,7 @@ func (p *PostgresDBService) TruncateIdentifiedValidators() error {
 	}
 	defer conn.Release()
 
-	_, err = conn.Exec(p.ctx, tuncateIdentifiedValidatorsQuery)
+	_, err = conn.Exec(p.ctx, truncateIdentifiedValidatorsQuery)
 	if err != nil {
 		return errors.Wrap(err, "error truncating identified validators")
 	}
