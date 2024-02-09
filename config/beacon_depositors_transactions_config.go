@@ -36,7 +36,7 @@ func (c *BeaconDepositorsTransactionsConfig) Apply(ctx *cli.Context) {
 	if ctx.IsSet("db-url") {
 		c.DBUrl = ctx.String("db-url")
 	}
-	if ctx.IsSet("db-workers-num") {
+	if ctx.IsSet("workers-num") {
 		c.Workers = ctx.Int("workers-num")
 	}
 	if ctx.IsSet("alchemy-url") {
