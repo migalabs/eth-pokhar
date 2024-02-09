@@ -6,18 +6,18 @@ import (
 	"syscall"
 	"time"
 
-	beaconDepTx "github.com/migalabs/eth-pokhar/beacon-depositors-transactions"
 	"github.com/migalabs/eth-pokhar/config"
+	"github.com/migalabs/eth-pokhar/identify"
 	"github.com/migalabs/eth-pokhar/utils"
 	"github.com/sirupsen/logrus"
 
 	cli "github.com/urfave/cli/v2"
 )
 
-var BeaconDepositorsTransactionsCommand = &cli.Command{
-	Name:   "beacon_depositors_transactions",
-	Usage:  "fetches the transactions of the depositors of the beaconchain contract",
-	Action: LaunchBeaconDepositorsTransactions,
+var IdentifyCommand = &cli.Command{
+	Name:   "identify",
+	Usage:  "Identify the pool in which validators are participating or the entity who operates the validators",
+	Action: LaunchIdentify,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:        "el-endpoint",
@@ -37,36 +37,34 @@ var BeaconDepositorsTransactionsCommand = &cli.Command{
 			EnvVars:     []string{"LOG_LEVEL"},
 			DefaultText: "info",
 		},
-		&cli.IntFlag{
-			Name:        "workers-num",
-			Usage:       "Number of workers to process API requests",
-			EnvVars:     []string{"WORKER_NUM"},
-			DefaultText: "10",
-		},
 		&cli.StringFlag{
 			Name:        "alchemy-url",
 			Usage:       "Alchemy url",
 			EnvVars:     []string{"ALCHEMY_URL"},
 			DefaultText: "https://eth-mainnet.g.alchemy.com/v2/KEY",
 		},
+		&cli.BoolFlag{
+			Name:  "recreate-table",
+			Usage: "Recreate the t_identified_validators table, meant to be used when one of the methodologies of identification changes",
+		},
 	},
 }
 
-var logCmdBeaconDepTx = logrus.WithField(
-	"module", "beaconDepositorsTransactionsCommand",
+var logCmdIdentify = logrus.WithField(
+	"module", "identifyCommand",
 )
 
 var QueryTimeout = 90 * time.Second
 
-func LaunchBeaconDepositorsTransactions(c *cli.Context) error {
+func LaunchIdentify(c *cli.Context) error {
 
-	conf := config.NewBeaconDepositorsTransactionsConfig()
+	conf := config.NewIdentifyConfig()
 	conf.Apply(c)
 
 	logrus.SetLevel(utils.ParseLogLevel(conf.LogLevel))
 
-	// generate the beaconDepositorsTransactions
-	beaconDepositorsTransactions, err := beaconDepTx.NewBeaconDepositorsTransactions(c.Context, conf)
+	// generate the identify
+	identifyRunner, err := identify.NewIdentify(c.Context, conf)
 	if err != nil {
 		return err
 	}
@@ -77,17 +75,17 @@ func LaunchBeaconDepositorsTransactions(c *cli.Context) error {
 	signal.Notify(sigtermC, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		beaconDepositorsTransactions.Run()
+		identifyRunner.Run()
 		procDoneC <- struct{}{}
 	}()
 
 	select {
 	case <-sigtermC:
-		logCmdBeaconDepTx.Info("Sudden shutdown detected, controlled shutdown of the cli triggered")
-		beaconDepositorsTransactions.Stop()
+		logCmdIdentify.Info("Sudden shutdown detected, controlled shutdown of the cli triggered")
+		identifyRunner.Stop()
 
 	case <-procDoneC:
-		logCmdBeaconDepTx.Info("Process successfully finished!")
+		logCmdIdentify.Info("Process successfully finished!")
 	}
 	close(sigtermC)
 	close(procDoneC)

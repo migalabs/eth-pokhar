@@ -4,25 +4,24 @@ import (
 	cli "github.com/urfave/cli/v2"
 )
 
-type BeaconDepositorsTransactionsConfig struct {
-	LogLevel   string `json:"log-level"`
-	ElEndpoint string `json:"el-endpoint"`
-	DBUrl      string `json:"db-url"`
-	Workers    int    `json:"workers-num"`
-	AlchemyURL string `json:"alchemy-url"`
+type IdentifyConfig struct {
+	LogLevel      string `json:"log-level"`
+	ElEndpoint    string `json:"el-endpoint"`
+	DBUrl         string `json:"db-url"`
+	AlchemyURL    string `json:"alchemy-url"`
+	RecreateTable bool   `json:"recreate-table"`
 }
 
-func NewBeaconDepositorsTransactionsConfig() *BeaconDepositorsTransactionsConfig {
+func NewIdentifyConfig() *IdentifyConfig {
 	// Return Default values for the ethereum configuration
-	return &BeaconDepositorsTransactionsConfig{
+	return &IdentifyConfig{
 		LogLevel:   DefaultLogLevel,
 		DBUrl:      DefaultDBUrl,
 		ElEndpoint: DefaultElEndpoint,
-		Workers:    DefaultWorkers,
 		AlchemyURL: DefaultAlchemyURL}
 }
 
-func (c *BeaconDepositorsTransactionsConfig) Apply(ctx *cli.Context) {
+func (c *IdentifyConfig) Apply(ctx *cli.Context) {
 	// apply to the existing Default configuration the set flags
 	// log level
 	if ctx.IsSet("log-level") {
@@ -36,11 +35,12 @@ func (c *BeaconDepositorsTransactionsConfig) Apply(ctx *cli.Context) {
 	if ctx.IsSet("db-url") {
 		c.DBUrl = ctx.String("db-url")
 	}
-	if ctx.IsSet("db-workers-num") {
-		c.Workers = ctx.Int("workers-num")
-	}
 	if ctx.IsSet("alchemy-url") {
 		c.AlchemyURL = ctx.String("alchemy-url")
+	}
+
+	if ctx.Bool("recreate-table") {
+		c.RecreateTable = true
 	}
 
 }
