@@ -29,7 +29,7 @@ var IdentifyCommand = &cli.Command{
 			Name:        "db-url",
 			Usage:       "Database where to store transactions",
 			EnvVars:     []string{"DB_URL"},
-			DefaultText: "postgres://user:password@localhost:5432/goteth",
+			DefaultText: "postgres://user:password@localhost:5432/dbName",
 		},
 		&cli.StringFlag{
 			Name:        "log-level",
