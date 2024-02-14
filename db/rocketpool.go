@@ -15,11 +15,10 @@ const (
 	FROM t_rocketpool;
 	`
 	identifyRocketpoolValidators = `
-	INSERT INTO t_identified_validators (f_validator_pubkey, f_pool_name)
-	SELECT DISTINCT f_validator_pubkey, 'rocketpool'::text
+	UPDATE t_identified_validators 
+	SET f_pool_name = 'rocketpool'
 	FROM t_rocketpool
-	ON CONFLICT (f_validator_pubkey) DO UPDATE
-	SET f_pool_name = EXCLUDED.f_pool_name;
+	WHERE t_identified_validators.f_validator_pubkey = t_rocketpool.f_validator_pubkey;
 	`
 )
 
@@ -77,7 +76,7 @@ func (p *PostgresDBService) CopyRocketpoolValidators(rowSrc []string) int64 {
 	// Acquire a database connection
 	conn, err := p.psqlPool.Acquire(p.ctx)
 	if err != nil {
-		wlog.Fatalf("Error acquiring database connection: %v", err)
+		return 0
 	}
 	defer conn.Release()
 
@@ -88,13 +87,13 @@ func (p *PostgresDBService) CopyRocketpoolValidators(rowSrc []string) int64 {
 		);
 	`)
 	if err != nil {
-		wlog.Fatalf("Error creating temporary table: %v", err)
+		return 0
 	}
 
 	// Copy the data to the temporary table
 	_, err = conn.CopyFrom(p.ctx, pgx.Identifier{tempTableName}, []string{"f_validator_pubkey"}, pgx.CopyFromRows(validators))
 	if err != nil {
-		wlog.Fatalf("Error copying data to temporary table: %v", err)
+		return 0
 	}
 
 	// Insert the data from the temporary table to the main table
@@ -105,13 +104,13 @@ func (p *PostgresDBService) CopyRocketpoolValidators(rowSrc []string) int64 {
 		ON CONFLICT (f_validator_pubkey) DO NOTHING;
 	`)
 	if err != nil {
-		wlog.Fatalf("Error inserting data from temporary table to main table: %v", err)
+		return 0
 	}
 
 	// Drop the temporary table
 	_, err = conn.Exec(p.ctx, `DROP TABLE `+tempTableName+`;`)
 	if err != nil {
-		wlog.Fatalf("Error dropping temporary table: %v", err)
+		return 0
 	}
 	if count.RowsAffected() > 0 {
 		wlog.Debugf("persisted %d rows in %f seconds", count.RowsAffected(), time.Since(startTime).Seconds())
