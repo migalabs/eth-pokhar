@@ -22,3 +22,16 @@ services:
       --alchemy-url=${ALCHEMY_URL}
       --recreate-table"
     network_mode: "host"
+    depends_on:
+      - db
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${DATABASE_USERNAME}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+    volumes:
+      - ./app-data/:/var/lib/postgresql/data/
+    ports:
+      - "127.0.0.1:${LOCAL_PORT}:5432"
