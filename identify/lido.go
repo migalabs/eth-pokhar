@@ -87,6 +87,9 @@ func (i *Identify) IdentifyLidoValidators() error {
 	var wg sync.WaitGroup
 
 	for operatorIndex := int64(0); operatorIndex < operatorsCount; operatorIndex++ {
+		if i.stop {
+			break
+		}
 		wg.Add(1)
 		workerSemaphore <- struct{}{}
 		operator, err := lidoContract.GetOperatorData(big.NewInt(operatorIndex))
@@ -107,6 +110,9 @@ func (i *Identify) IdentifyLidoValidators() error {
 	log.Debug("Finished getting keys for each operator")
 
 	wg.Wait()
+	if i.stop {
+		return nil
+	}
 
 	log.Debug("Identifying lido validators")
 	err = i.dbClient.IdentifyLidoValidators()
@@ -134,10 +140,14 @@ func (i *Identify) processOperatorKeys(operator lido.NodeOperator, operatorValid
 		return nil
 	}
 	remainingKeys := operator.TotalSigningKeys - operatorValidatorCount
+	savedKeys := int64(0)
 	var validatorPubkeys []string
 	var batchSize uint64
 	var batchIndex uint64
 	for keyIndex := operatorValidatorCount; keyIndex < operator.TotalSigningKeys; keyIndex++ {
+		if i.stop {
+			break
+		}
 		if validatorPubkeys == nil {
 			batchIndex = 0
 			batchSize = min(remainingKeys, maxBatchSize)
@@ -156,11 +166,12 @@ func (i *Identify) processOperatorKeys(operator lido.NodeOperator, operatorValid
 			count := i.dbClient.CopyLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys)
 			log.Debugf("Inserted %v validators for operator %v. %v remaining", count, operatorName, remainingKeys)
 			validatorPubkeys = nil
+			savedKeys += int64(batchSize)
 		} else {
 			batchIndex++
 		}
 	}
-	log.Infof("Got %v new keys for operator %v", operator.TotalSigningKeys-operatorValidatorCount, operatorName)
+	log.Infof("Got %v new keys for operator %v", savedKeys, operatorName)
 
 	return nil
 }
