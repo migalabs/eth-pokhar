@@ -75,7 +75,7 @@ func (i *Identify) GetRocketPoolKeys() ([]string, error) {
 			for {
 				pubkey, err := getMiniPoolPubkey(rp, minipoolAddress)
 				if err != nil {
-					if !strings.Contains(err.Error(), "429") {
+					if !strings.Contains(err.Error(), utils.ErrorCode429) {
 						retry++
 					}
 					if retry > utils.MaxRetries {

@@ -132,6 +132,12 @@ func (i *Identify) Run() {
 		}
 		log.Info("Identified rocketpool validators")
 	}
+	if !i.stop {
+		log.Info("Identifying lido validators")
+		i.IdentifyLidoValidators()
+
+		log.Info("Identified lido validators")
+	}
 
 	endTime := time.Now()
 	log.Infof("Identify routine finished in %v", endTime.Sub(initTime))
