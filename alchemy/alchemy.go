@@ -201,7 +201,7 @@ func (ac *AlchemyClient) GetAssetTransfers(ctx context.Context, params *GetAsset
 	for {
 		err := ac.rpcClient.CallContext(ctx, &raw, "alchemy_getAssetTransfers", params)
 		if err != nil {
-			if !strings.Contains(err.Error(), "429") {
+			if !strings.Contains(err.Error(), utils.ErrorCode429) {
 				retry++
 				ac.Reconnect()
 			}

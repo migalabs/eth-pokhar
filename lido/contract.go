@@ -93,7 +93,7 @@ func (l *LidoContract) retryContractCall(call func() (interface{}, error)) (inte
 	for {
 		result, err := call()
 		if err != nil {
-			if !strings.Contains(err.Error(), "429") {
+			if !strings.Contains(err.Error(), utils.ErrorCode429) {
 				retry++
 			}
 			if retry > 5 {

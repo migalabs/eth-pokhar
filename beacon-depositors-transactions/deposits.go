@@ -50,7 +50,7 @@ func (b *BeaconDepositorsTransactions) processDepositTransfers(transfers []alche
 					receipt, err := b.ethClient.TransactionReceipt(b.ctx, txHash)
 
 					if err != nil {
-						if strings.Contains(err.Error(), "429") {
+						if strings.Contains(err.Error(), utils.ErrorCode429) {
 							if attempt > 10 {
 								logger.Debugf("Retrying after 429 error (Attempt %d)\n", attempt)
 							}
