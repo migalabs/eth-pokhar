@@ -112,6 +112,27 @@ func (i *Identify) Run() {
 		}
 		log.Info("Identified coinbase validators")
 	}
+
+	if !i.stop {
+		log.Info("Identifying rocketpool validators")
+		startTime := time.Now()
+
+		newRocketpoolKeys, err := i.GetRocketPoolKeys()
+		if err != nil {
+			log.Fatalf("Error identifying rocketpool validators: %v", err)
+		}
+		log.WithFields(log.Fields{
+			"NewDetectedKeys": len(newRocketpoolKeys),
+			"Duration":        time.Since(startTime),
+		}).Info("RocketPool Keys:")
+		i.dbClient.CopyRocketpoolValidators(newRocketpoolKeys)
+		err = i.dbClient.IdentifyRocketpoolValidators()
+		if err != nil {
+			log.Fatalf("Error identifying rocketpool validators: %v", err)
+		}
+		log.Info("Identified rocketpool validators")
+	}
+
 	endTime := time.Now()
 	log.Infof("Identify routine finished in %v", endTime.Sub(initTime))
 	i.CloseConnections()
