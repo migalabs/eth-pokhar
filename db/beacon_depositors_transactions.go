@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/migalabs/eth-pokhar/models"
+	"github.com/pkg/errors"
 )
 
 // Postgres intregration variables
@@ -32,7 +33,13 @@ var (
 )
 
 func (p *PostgresDBService) ObtainCheckpointPerDepositor() ([]models.DepositorCheckpoint, error) {
-	rows, err := p.psqlPool.Query(p.ctx, selectCheckpointPerDepositor)
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "error acquiring database connection")
+	}
+	defer conn.Release()
+
+	rows, err := conn.Query(p.ctx, selectCheckpointPerDepositor)
 	if err != nil {
 		rows.Close()
 		return nil, err
