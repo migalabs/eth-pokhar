@@ -32,78 +32,77 @@ func NewLidoContract(nodeEndpoint string) (*LidoContract, error) {
 	}
 	return &LidoContract{contract: contract, address: NODE_OPS_ADDRESS}, nil
 }
-
 func (l *LidoContract) GetNodeOperatorsCount() (int64, error) {
-	retry := 0
-	var operatorsCount *big.Int
-	var err error
-	for {
-		operatorsCount, err = l.contract.GetNodeOperatorsCount(nil)
-		if err != nil {
-			if !strings.Contains(err.Error(), "429") {
-				retry++
-			}
-			if retry > 5 {
-				return 0, errors.Wrap(err, "error getting operators count")
-			}
-			waitTime := utils.GetRandomTimeout()
-			time.Sleep(waitTime)
-			continue
-		}
-		break
+	result, err := l.retryContractCall(func() (interface{}, error) {
+		return l.contract.GetNodeOperatorsCount(nil)
+	})
+	if err != nil {
+		return 0, err
 	}
-
-	return operatorsCount.Int64(), nil
+	return result.(*big.Int).Int64(), nil
 }
 
 func (l *LidoContract) GetOperatorData(index *big.Int) (NodeOperator, error) {
-	retry := 0
-	for {
-		operator, err := l.contract.GetNodeOperator(nil, index, true)
-		if err != nil {
-			if !strings.Contains(err.Error(), "429") {
-				retry++
-			}
-			if retry > 5 {
-				return NodeOperator{}, errors.Wrap(err, "error getting operators count")
-			}
-			waitTime := utils.GetRandomTimeout()
-			time.Sleep(waitTime)
-			continue
-		}
-		return NodeOperator{
-			Index:             index.Uint64(),
-			Active:            operator.Active,
-			Name:              operator.Name,
-			RewardAddress:     operator.RewardAddress,
-			StakingLimit:      operator.StakingLimit,
-			StoppedValidators: operator.StoppedValidators,
-			TotalSigningKeys:  operator.TotalSigningKeys,
-			UsedSigningKeys:   operator.UsedSigningKeys,
-		}, nil
+	result, err := l.retryContractCall(func() (interface{}, error) {
+		return l.contract.GetNodeOperator(nil, index, true)
+	})
+	if err != nil {
+		return NodeOperator{}, err
 	}
-
+	operator := result.(struct {
+		Active            bool
+		Name              string
+		RewardAddress     common.Address
+		StakingLimit      uint64
+		StoppedValidators uint64
+		TotalSigningKeys  uint64
+		UsedSigningKeys   uint64
+	})
+	return NodeOperator{
+		Index:             index.Uint64(),
+		Active:            operator.Active,
+		Name:              operator.Name,
+		RewardAddress:     operator.RewardAddress,
+		StakingLimit:      operator.StakingLimit,
+		StoppedValidators: operator.StoppedValidators,
+		TotalSigningKeys:  operator.TotalSigningKeys,
+		UsedSigningKeys:   operator.UsedSigningKeys,
+	}, nil
 }
 
 func (l *LidoContract) GetOperatorKey(operator NodeOperator, keyIndex uint64) (OperatorKey, error) {
+	result, err := l.retryContractCall(func() (interface{}, error) {
+		return l.contract.GetSigningKey(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(keyIndex)))
+	})
+	if err != nil {
+		return OperatorKey{}, err
+	}
+	key := result.(struct {
+		Key              []byte
+		DepositSignature []byte
+		Used             bool
+	})
+	return OperatorKey{
+		Key:              key.Key,
+		DepositSignature: key.DepositSignature,
+		Used:             key.Used,
+	}, nil
+}
+func (l *LidoContract) retryContractCall(call func() (interface{}, error)) (interface{}, error) {
 	retry := 0
 	for {
-		key, err := l.contract.GetSigningKey(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(keyIndex)))
+		result, err := call()
 		if err != nil {
 			if !strings.Contains(err.Error(), "429") {
 				retry++
 			}
 			if retry > 5 {
-				return OperatorKey{}, errors.Wrap(err, "error getting operators count")
+				return nil, errors.Wrap(err, "error making contract call")
 			}
 			waitTime := utils.GetRandomTimeout()
 			time.Sleep(waitTime)
 			continue
 		}
-		return OperatorKey{
-			Key:              key.Key,
-			DepositSignature: key.DepositSignature,
-			Used:             key.Used,
-		}, nil
+		return result, nil
 	}
 }
