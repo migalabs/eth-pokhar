@@ -1,0 +1,24 @@
+version: "3.7"
+
+services:
+  eth-pokhar:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    init: true
+    command: >-
+      "./eth_pokhar beacon_depositors_transactions
+      --log-level=${LOG_LEVEL}
+      --el-endpoint=${EL_ENDPOINT}
+      --db-url=${DB_URL}
+      --workers-num=${WORKER_NUM}
+      --alchemy-url=${ALCHEMY_URL}
+      &&
+      ./eth_pokhar identify
+      --log-level=${LOG_LEVEL}
+      --el-endpoint=${EL_ENDPOINT}
+      --db-url=${DB_URL}
+      --workers-num=${WORKER_NUM}
+      --alchemy-url=${ALCHEMY_URL}
+      --recreate-table"
+    network_mode: "host"
