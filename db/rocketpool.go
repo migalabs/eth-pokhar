@@ -15,11 +15,10 @@ const (
 	FROM t_rocketpool;
 	`
 	identifyRocketpoolValidators = `
-	INSERT INTO t_identified_validators (f_validator_pubkey, f_pool_name)
-	SELECT DISTINCT f_validator_pubkey, 'rocketpool'::text
+	UPDATE t_identified_validators 
+	SET f_pool_name = 'rocketpool'
 	FROM t_rocketpool
-	ON CONFLICT (f_validator_pubkey) DO UPDATE
-	SET f_pool_name = EXCLUDED.f_pool_name;
+	WHERE t_identified_validators.f_validator_pubkey = t_rocketpool.f_validator_pubkey;
 	`
 )
 

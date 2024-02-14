@@ -9,6 +9,7 @@ type IdentifyConfig struct {
 	ElEndpoint    string `json:"el-endpoint"`
 	DBUrl         string `json:"db-url"`
 	AlchemyURL    string `json:"alchemy-url"`
+	Workers       int    `json:"workers-num"`
 	RecreateTable bool   `json:"recreate-table"`
 }
 
@@ -18,6 +19,7 @@ func NewIdentifyConfig() *IdentifyConfig {
 		LogLevel:   DefaultLogLevel,
 		DBUrl:      DefaultDBUrl,
 		ElEndpoint: DefaultElEndpoint,
+		Workers:    DefaultWorkers,
 		AlchemyURL: DefaultAlchemyURL}
 }
 
@@ -38,7 +40,9 @@ func (c *IdentifyConfig) Apply(ctx *cli.Context) {
 	if ctx.IsSet("alchemy-url") {
 		c.AlchemyURL = ctx.String("alchemy-url")
 	}
-
+	if ctx.IsSet("workers-num") {
+		c.Workers = ctx.Int("workers-num")
+	}
 	if ctx.Bool("recreate-table") {
 		c.RecreateTable = true
 	}

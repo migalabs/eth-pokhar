@@ -27,7 +27,6 @@ type RocketpoolMinipool struct {
 	NodeAddress []byte
 }
 
-const MaxRetries = 10
 const TimeoutSeconds = 1
 
 // Mainnet rocket pool contract
@@ -64,8 +63,7 @@ func (i *Identify) GetRocketPoolKeys() ([]string, error) {
 	// Get the validator pubkey for each minipool
 	var wg sync.WaitGroup
 	minipoolKeysCh := make(chan string, len(minipools))
-	maxWorkers := 10
-	workerSemaphore := make(chan struct{}, maxWorkers)
+	workerSemaphore := make(chan struct{}, i.iConfig.Workers)
 
 	for i := 0; i < len(minipools); i++ {
 		wg.Add(1)
@@ -80,7 +78,7 @@ func (i *Identify) GetRocketPoolKeys() ([]string, error) {
 					if !strings.Contains(err.Error(), "429") {
 						retry++
 					}
-					if retry > 5 {
+					if retry > utils.MaxRetries {
 						log.WithFields(log.Fields{
 							"MinipoolAddress": minipoolAddress.Hex(),
 						}).Error("Could not get minipool info")
@@ -139,7 +137,7 @@ func getMinipoolAddressesWithErrorHandling(rp *rocketpool.RocketPool, startFrom 
 			wg.Go(func() error {
 				var err error
 				var address common.Address
-				for i := 0; i < MaxRetries; i++ {
+				for i := 0; i < utils.MaxRetries; i++ {
 					address, err = minipool.GetMinipoolAt(rp, mi, opts)
 					if err == nil {
 						addresses[mi-startFrom] = address

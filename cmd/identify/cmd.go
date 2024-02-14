@@ -43,6 +43,12 @@ var IdentifyCommand = &cli.Command{
 			EnvVars:     []string{"ALCHEMY_URL"},
 			DefaultText: "https://eth-mainnet.g.alchemy.com/v2/KEY",
 		},
+		&cli.IntFlag{
+			Name:        "workers-num",
+			Usage:       "Number of workers to process API requests",
+			EnvVars:     []string{"WORKER_NUM"},
+			DefaultText: "10",
+		},
 		&cli.BoolFlag{
 			Name:  "recreate-table",
 			Usage: "Recreate the t_identified_validators table, meant to be used when one of the methodologies of identification changes",
