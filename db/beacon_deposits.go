@@ -23,7 +23,12 @@ var (
 )
 
 func (p *PostgresDBService) ObtainLastDeposit() (models.BeaconDeposit, error) {
-	rows, err := p.psqlPool.Query(p.ctx, selectLastDeposit)
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return models.BeaconDeposit{}, errors.Wrap(err, "error acquiring connection")
+	}
+	defer conn.Release()
+	rows, err := conn.Query(p.ctx, selectLastDeposit)
 	if err != nil {
 		rows.Close()
 		return models.BeaconDeposit{}, errors.Wrap(err, "error obtaining last epoch from database")
@@ -54,8 +59,14 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 
 	deposits := beaconDepositToCopyData(rowSrc)
 
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		wlog.Fatalf("could not acquire connection: %s", err.Error())
+	}
+	defer conn.Release()
+
 	// Create a temporary table with a unique constraint
-	_, err := p.psqlPool.Exec(p.ctx, `
+	_, err = conn.Exec(p.ctx, `
         CREATE TEMP TABLE IF NOT EXISTS `+tempTableName+` (
             f_block_num bigint,
             f_depositor text,
@@ -68,7 +79,7 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 	}
 
 	// Copy data into the temporary table, ignoring duplicates
-	_, err = p.psqlPool.CopyFrom(
+	_, err = conn.CopyFrom(
 		p.ctx,
 		pgx.Identifier{tempTableName},
 		[]string{"f_block_num", "f_depositor", "f_tx_hash", "f_validator_pubkey"},
@@ -79,7 +90,7 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 	}
 
 	// Insert non-duplicate rows from the temporary table into the target table
-	count, err := p.psqlPool.Exec(p.ctx, `
+	count, err := conn.Exec(p.ctx, `
         INSERT INTO t_beacon_deposits (f_block_num, f_depositor, f_tx_hash, f_validator_pubkey)
         SELECT f_block_num, f_depositor, f_tx_hash, f_validator_pubkey
         FROM `+tempTableName+`
@@ -90,7 +101,7 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 	}
 
 	// Drop the temporary table
-	_, err = p.psqlPool.Exec(p.ctx, `DROP TABLE IF EXISTS `+tempTableName)
+	_, err = conn.Exec(p.ctx, `DROP TABLE IF EXISTS `+tempTableName)
 	if err != nil {
 		wlog.Fatalf("could not drop temporary table: %s", err.Error())
 	}

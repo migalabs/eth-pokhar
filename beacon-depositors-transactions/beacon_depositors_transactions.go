@@ -72,7 +72,7 @@ func NewBeaconDepositorsTransactions(pCtx context.Context, iConfig *config.Beaco
 		ethClient:            elClient,
 		contractABI:          contractABI,
 		alchemyClient:        alchemyClient,
-		routineClosed:        make(chan struct{}),
+		routineClosed:        make(chan struct{}, 1),
 		checkpointsProcessed: &atomic.Uint64{},
 	}, nil
 }
