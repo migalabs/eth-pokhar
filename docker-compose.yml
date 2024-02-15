@@ -24,6 +24,11 @@ services:
     network_mode: "host"
     depends_on:
       - db
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+
   db:
     image: postgres
     restart: always
