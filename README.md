@@ -166,7 +166,19 @@ If specific upgrades or downgrades need to be done manually, one could do this w
 
 ## Benchmarks
 
-TODO
+Utilizing Alchemy as EL node and API, with a local database, these are the benchmarks for the tool:
+
+- `beacon_depositors_transactions`:
+  - Fetching deposits on the first run: 1h 16m
+  - Fetching depositors transactions: 15h 22m
+  - Total time: 16h 38m
+- `identify`:
+  - Fetching Rocketpool validators on the first run: 38m
+  - Fetching Lido validators on the first run: 4h 13m
+  - Total time: 4h 51m
+- Total time for the first run: 21h 29m
+
+If running the tool on a weekly basis, expect the tool to take around 16h to run considering that the process of fetching depositors transactions will be done on every run.
 
 ## Maintainers
 
