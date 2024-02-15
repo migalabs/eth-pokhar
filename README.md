@@ -140,6 +140,8 @@ This table stores the validators with the pool/entity that operates them. Uniden
 
 As mentioned before, the tool can be used to identify validators by using off-chain data. For this purpose, two tables are created in the database on the first run: `t_depositors_insert` and `t_validators_insert`.
 
+**Important note**: addresses must be all lowercase and without the `0x` prefix.
+
 ### `t_depositors_insert`
 
 This table has the columns `f_depositor` and `f_pool_name`. The `identify` command will use this table to identify the pool in which the validators are participating. The `f_depositor` column is the address of the depositor and the `f_pool_name` is the name of the pool in which the validators are participating. All validators that have the same depositor address will be tagged with the `f_pool_name` value.
