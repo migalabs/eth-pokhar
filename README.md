@@ -150,6 +150,10 @@ This table has the columns `f_depositor` and `f_pool_name`. The `identify` comma
 
 This table has the columns `f_validator_pubkey` and `f_pool_name`. The `identify` command will use this table to identify the pool in which the validators are participating. The `f_validator_pubkey` column is the address of the validator and the `f_pool_name` is the name of the pool in which the validators are participating. These values will be used to tag the validators.
 
+## Whale tagging
+
+We use the following deffinition of a whale: unidentified depositor responsible for 100+ validators. The tool will tag the whale with the `whale_0x....` tag (first 4 characters of the depositor address).
+
 ## Identification priority
 
 Since the end table `t_identified_validators` is the result of the identification process, validators' pool/entity will be tagged in the following order (if the validator is already tagged, the next step will override the previous tag, resulting in the last tag being the one that is stored):

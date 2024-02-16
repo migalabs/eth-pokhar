@@ -49,6 +49,12 @@ var IdentifyCommand = &cli.Command{
 			EnvVars:     []string{"WORKER_NUM"},
 			DefaultText: "10",
 		},
+		&cli.IntFlag{
+			Name:        "whale-threshold",
+			Usage:       "Minimum number of validators to be considered a whale",
+			EnvVars:     []string{"WHALE_THRESHOLD"},
+			DefaultText: "100",
+		},
 		&cli.BoolFlag{
 			Name:  "recreate-table",
 			Usage: "Recreate the t_identified_validators table, meant to be used when one of the methodologies of identification changes",

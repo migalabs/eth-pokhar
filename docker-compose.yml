@@ -7,7 +7,8 @@ services:
       dockerfile: Dockerfile
     init: true
     command: >-
-      "./eth_pokhar beacon_depositors_transactions
+      "
+      ./eth_pokhar beacon_depositors_transactions
       --log-level=${LOG_LEVEL}
       --el-endpoint=${EL_ENDPOINT}
       --db-url=${DB_URL}
@@ -21,9 +22,11 @@ services:
       --workers-num=${WORKER_NUM}
       --alchemy-url=${ALCHEMY_URL}
       --recreate-table"
+      --whale-threshold=${WHALE_THRESHOLD}
     network_mode: "host"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     deploy:
       restart_policy:
         condition: on-failure
@@ -40,3 +43,8 @@ services:
       - ./app-data/:/var/lib/postgresql/data/
     ports:
       - "127.0.0.1:${LOCAL_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

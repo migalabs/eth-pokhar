@@ -5,22 +5,24 @@ import (
 )
 
 type IdentifyConfig struct {
-	LogLevel      string `json:"log-level"`
-	ElEndpoint    string `json:"el-endpoint"`
-	DBUrl         string `json:"db-url"`
-	AlchemyURL    string `json:"alchemy-url"`
-	Workers       int    `json:"workers-num"`
-	RecreateTable bool   `json:"recreate-table"`
+	LogLevel       string `json:"log-level"`
+	ElEndpoint     string `json:"el-endpoint"`
+	DBUrl          string `json:"db-url"`
+	AlchemyURL     string `json:"alchemy-url"`
+	Workers        int    `json:"workers-num"`
+	RecreateTable  bool   `json:"recreate-table"`
+	WhaleThreshold int    `json:"whale-threshold"`
 }
 
 func NewIdentifyConfig() *IdentifyConfig {
 	// Return Default values for the ethereum configuration
 	return &IdentifyConfig{
-		LogLevel:   DefaultLogLevel,
-		DBUrl:      DefaultDBUrl,
-		ElEndpoint: DefaultElEndpoint,
-		Workers:    DefaultWorkers,
-		AlchemyURL: DefaultAlchemyURL}
+		LogLevel:       DefaultLogLevel,
+		DBUrl:          DefaultDBUrl,
+		ElEndpoint:     DefaultElEndpoint,
+		Workers:        DefaultWorkers,
+		AlchemyURL:     DefaultAlchemyURL,
+		WhaleThreshold: DefaultWhaleThreshold}
 }
 
 func (c *IdentifyConfig) Apply(ctx *cli.Context) {
@@ -45,6 +47,9 @@ func (c *IdentifyConfig) Apply(ctx *cli.Context) {
 	}
 	if ctx.Bool("recreate-table") {
 		c.RecreateTable = true
+	}
+	if ctx.IsSet("whale-threshold") {
+		c.WhaleThreshold = ctx.Int("whale-threshold")
 	}
 
 }

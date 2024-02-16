@@ -93,6 +93,17 @@ func (i *Identify) Run() {
 
 	if !i.stop {
 		startTime := time.Now()
+		log.Info("Identifying whales")
+		err := i.dbClient.IdentifyWhales(i.iConfig.WhaleThreshold)
+		if err != nil {
+			log.Fatalf("Error identifying whales: %v", err)
+		}
+		endTime := time.Now()
+		log.Infof("Identified whales in %v", endTime.Sub(startTime))
+	}
+
+	if !i.stop {
+		startTime := time.Now()
 		log.Info("Applying validators insert")
 		err := i.dbClient.ApplyValidatorsInsert()
 		if err != nil {
