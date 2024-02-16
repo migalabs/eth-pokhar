@@ -86,7 +86,7 @@ func (b *BeaconDepositorsTransactions) Run() {
 		log.Info("Downloading new beacon deposits...")
 		b.downloadBeaconDeposits()
 		duration := time.Since(initTime).Seconds()
-		log.Info("Finished downloading new beacon deposits in ", duration)
+		log.Infof("Finished downloading new beacon deposits in %f seconds", duration)
 
 	}
 	if !b.stop {
@@ -94,10 +94,10 @@ func (b *BeaconDepositorsTransactions) Run() {
 		log.Info("Updating depositors transactions...")
 		b.updateDepositorsTransactions()
 		duration := time.Since(initTime).Seconds()
-		log.Info("Finished updating depositors transactions in ", duration)
+		log.Infof("Finished updating depositors transactions in %f seconds", duration)
 	}
 	totalDuration := time.Since(totalInitTime).Seconds()
-	log.Info("Finished beacon_depositors_transactions in ", totalDuration)
+	log.Infof("Finished beacon_depositors_transactions in %f seconds", totalDuration)
 
 	b.CloseConnections()
 	log.Debug("Sending signal that beacon_depositors_transactions finished")

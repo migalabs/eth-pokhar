@@ -1,0 +1,42 @@
+version: "3.7"
+
+services:
+  eth-pokhar:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    init: true
+    command: >-
+      "./eth_pokhar beacon_depositors_transactions
+      --log-level=${LOG_LEVEL}
+      --el-endpoint=${EL_ENDPOINT}
+      --db-url=${DB_URL}
+      --workers-num=${WORKER_NUM}
+      --alchemy-url=${ALCHEMY_URL}
+      &&
+      ./eth_pokhar identify
+      --log-level=${LOG_LEVEL}
+      --el-endpoint=${EL_ENDPOINT}
+      --db-url=${DB_URL}
+      --workers-num=${WORKER_NUM}
+      --alchemy-url=${ALCHEMY_URL}
+      --recreate-table"
+    network_mode: "host"
+    depends_on:
+      - db
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${DATABASE_USERNAME}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+    volumes:
+      - ./app-data/:/var/lib/postgresql/data/
+    ports:
+      - "127.0.0.1:${LOCAL_PORT}:5432"

@@ -70,47 +70,57 @@ func (i *Identify) Run() {
 	log.Info("Starting Identify routine")
 
 	if i.iConfig.RecreateTable && !i.stop {
+		startTime := time.Now()
 		log.Info("Truncating identified validators table")
 		err := i.dbClient.TruncateIdentifiedValidators()
 		if err != nil {
 			log.Fatalf("Error truncating identified validators table: %v", err)
 		}
-		log.Info("Truncated identified validators")
+		endTime := time.Now()
+		log.Infof("Truncated identified validators table in %v", endTime.Sub(startTime))
 	}
 
 	if !i.stop {
+		startTime := time.Now()
 		log.Info("Adding new validators to database")
 		err := i.dbClient.AddNewValidators()
 		if err != nil {
 			log.Fatalf("Error adding new validators to database: %v", err)
 		}
-		log.Info("Added new validators to database")
+		endTime := time.Now()
+		log.Infof("Added new validators to database in %v", endTime.Sub(startTime))
 	}
 
 	if !i.stop {
+		startTime := time.Now()
 		log.Info("Applying validators insert")
 		err := i.dbClient.ApplyValidatorsInsert()
 		if err != nil {
 			log.Fatalf("Error applying validators insert: %v", err)
 		}
-		log.Info("Applied validators insert")
+		endTime := time.Now()
+		log.Infof("Applied validators insert in %v", endTime.Sub(startTime))
 	}
 	if !i.stop {
+		startTime := time.Now()
 		log.Info("Applying depositors insert")
 		err := i.dbClient.ApplyDepositorsInsert()
 		if err != nil {
 			log.Fatalf("Error applying depositors insert: %v", err)
 		}
-		log.Info("Applied depositors insert")
+		endTime := time.Now()
+		log.Infof("Applied depositors insert in %v", endTime.Sub(startTime))
 	}
 
 	if !i.stop {
+		startTime := time.Now()
 		log.Info("Identifying coinbase validators")
 		err := i.dbClient.IdentifyCoinbaseValidators()
 		if err != nil {
 			log.Fatalf("Error identifying coinbase validators: %v", err)
 		}
-		log.Info("Identified coinbase validators")
+		endTime := time.Now()
+		log.Infof("Identified coinbase validators in %v", endTime.Sub(startTime))
 	}
 
 	if !i.stop {
@@ -123,7 +133,7 @@ func (i *Identify) Run() {
 		}
 		log.WithFields(log.Fields{
 			"NewDetectedKeys": len(newRocketpoolKeys),
-			"Duration":        time.Since(startTime),
+			"Duration (s)":    time.Since(startTime),
 		}).Info("RocketPool Keys:")
 		i.dbClient.CopyRocketpoolValidators(newRocketpoolKeys)
 		err = i.dbClient.IdentifyRocketpoolValidators()
@@ -133,10 +143,11 @@ func (i *Identify) Run() {
 		log.Info("Identified rocketpool validators")
 	}
 	if !i.stop {
+		startTime := time.Now()
 		log.Info("Identifying lido validators")
 		i.IdentifyLidoValidators()
-
-		log.Info("Identified lido validators")
+		endTime := time.Now()
+		log.Infof("Identified lido validators in %v", endTime.Sub(startTime))
 	}
 
 	endTime := time.Now()

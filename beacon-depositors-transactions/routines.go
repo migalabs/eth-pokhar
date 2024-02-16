@@ -100,7 +100,7 @@ func (b *BeaconDepositorsTransactions) downloadBeaconDeposits() {
 		if err != nil {
 			log.Fatalf("Error parsing block number: %s", err.Error())
 		}
-		log.Debugf("Downloaded 1000 more deposits on block %d", num)
+		log.Infof("Downloaded 1000 more deposits on block %d", num)
 		params.PageKey = newPageKey
 		firstCall = false
 		err = b.processDepositTransfers(newTransfers, b.iConfig.Workers)
