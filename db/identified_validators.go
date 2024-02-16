@@ -45,7 +45,7 @@ const (
 						F_DEPOSITOR
 				) AS count_subquery
 				WHERE 
-					count >= 100
+					count >= $1
 			) AS subquery
 			ON 
 				t1.f_depositor = subquery.f_depositor
@@ -89,14 +89,14 @@ func (p *PostgresDBService) TruncateIdentifiedValidators() error {
 	return nil
 }
 
-func (p *PostgresDBService) IdentifyWhales() error {
+func (p *PostgresDBService) IdentifyWhales(threshold int) error {
 	conn, err := p.psqlPool.Acquire(p.ctx)
 	if err != nil {
 		return errors.Wrap(err, "error acquiring database connection")
 	}
 	defer conn.Release()
 
-	_, err = conn.Exec(p.ctx, identifyWhalesQuery)
+	_, err = conn.Exec(p.ctx, identifyWhalesQuery, threshold)
 	if err != nil {
 		return errors.Wrap(err, "error identifying whales")
 	}

@@ -94,7 +94,7 @@ func (i *Identify) Run() {
 	if !i.stop {
 		startTime := time.Now()
 		log.Info("Identifying whales")
-		err := i.dbClient.IdentifyWhales()
+		err := i.dbClient.IdentifyWhales(i.iConfig.WhaleThreshold)
 		if err != nil {
 			log.Fatalf("Error identifying whales: %v", err)
 		}
