@@ -28,16 +28,24 @@ const (
 					f_depositor, 
 					CONCAT('whale_0x', LEFT(f_depositor, 4)) AS whale_id
 				FROM (
-					SELECT 
-						COUNT(*) AS count, 
-						f_depositor 
-					FROM 
-						t_beacon_deposits
-					GROUP BY 
-						f_depositor
+					SELECT
+						COUNT(*) AS COUNT,
+						F_DEPOSITOR
+					FROM
+						(
+							SELECT DISTINCT
+								F_VALIDATOR_PUBKEY,
+								F_DEPOSITOR
+							FROM
+								T_BEACON_DEPOSITS
+							WHERE
+								F_VALIDATOR_PUBKEY != ''
+						) aux
+					GROUP BY
+						F_DEPOSITOR
 				) AS count_subquery
 				WHERE 
-					count > 100
+					count >= 100
 			) AS subquery
 			ON 
 				t1.f_depositor = subquery.f_depositor
