@@ -7,7 +7,8 @@ services:
       dockerfile: Dockerfile
     init: true
     command: >-
-      "./eth_pokhar beacon_depositors_transactions
+      "
+      ./eth_pokhar beacon_depositors_transactions
       --log-level=${LOG_LEVEL}
       --el-endpoint=${EL_ENDPOINT}
       --db-url=${DB_URL}
@@ -21,6 +22,7 @@ services:
       --workers-num=${WORKER_NUM}
       --alchemy-url=${ALCHEMY_URL}
       --recreate-table"
+      --whale-threshold=${WHALE_THRESHOLD}
     network_mode: "host"
     depends_on:
       - db
