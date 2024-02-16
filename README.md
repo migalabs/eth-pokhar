@@ -186,6 +186,8 @@ Utilizing Alchemy as EL node and API, with a local database, these are the bench
 
 If running the tool on a weekly basis, expect the tool to take around 16h to run considering that the process of fetching depositors transactions will be done on every run.
 
+The size of the fully synced database is around 3GB.
+
 ## Maintainers
 
 @santi1234567
