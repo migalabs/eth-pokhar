@@ -25,7 +25,8 @@ services:
       --whale-threshold=${WHALE_THRESHOLD}
     network_mode: "host"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     deploy:
       restart_policy:
         condition: on-failure
@@ -42,3 +43,8 @@ services:
       - ./app-data/:/var/lib/postgresql/data/
     ports:
       - "127.0.0.1:${LOCAL_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
