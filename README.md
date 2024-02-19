@@ -13,7 +13,7 @@ This tool is used for tagging validators in [ethseer.io](https://ethseer.io/?net
 To use the tool, the following requirements must be met:
 
 - An alchemy API key (the free tier is enough). See [here](https://www.alchemy.com/pricing)
-- Access to a Ethereum EL node
+- Access to a Ethereum EL node (you can also use alchemy for this)
 
 Expect this tool to make the following amount of requests to the Ethereum EL node on the first run:
 
@@ -23,6 +23,8 @@ Expect this tool to make the following amount of requests to the Ethereum EL nod
 And the following amount of requests to the alchemy API on each run:
 
 - ~300k [alchemy_getAssetTransfers](https://docs.alchemy.com/reference/alchemy-getassettransfers) requests
+
+The size of the fully synced database is around 3GB.
 
 ## Available commands
 
@@ -50,13 +52,14 @@ Available options (configurable in the `.env` file):
 
 ```
 OPTIONS:
-   --el-endpoint value  Execution node endpoint (default: http://localhost:8545) [$EL_ENDPOINT]
-   --db-url value       Database where to store transactions (default: postgres://user:password@localhost:5432/dbName) [$DB_URL]
-   --log-level value    Log level: debug, warn, info, error (default: info) [$LOG_LEVEL]
-   --alchemy-url value  Alchemy url (default: https://eth-mainnet.g.alchemy.com/v2/KEY) [$ALCHEMY_URL]
-   --workers-num value  Number of workers to process API requests (default: 10) [$WORKER_NUM]
-   --recreate-table     Recreate the t_identified_validators table, meant to be used when one of the methodologies of identification changes (default: false)
-   --help, -h           show help
+   --el-endpoint value      Execution node endpoint (default: http://localhost:8545) [$EL_ENDPOINT]
+   --db-url value           Database where to store transactions (default: postgres://user:password@localhost:5432/dbName) [$DB_URL]
+   --log-level value        Log level: debug, warn, info, error (default: info) [$LOG_LEVEL]
+   --alchemy-url value      Alchemy url (default: https://eth-mainnet.g.alchemy.com/v2/KEY) [$ALCHEMY_URL]
+   --workers-num value      Number of workers to process API requests (default: 10) [$WORKER_NUM]
+   --whale-threshold value  Minimum number of validators to be considered a whale (default: 100) [$WHALE_THRESHOLD]
+   --recreate-table         Recreate the t_identified_validators table, meant to be used when one of the methodologies of identification changes (default: false)
+   --help, -h               show help
 ```
 
 ## Running with Docker (recommended)
@@ -152,7 +155,7 @@ This table has the columns `f_validator_pubkey` and `f_pool_name`. The `identify
 
 ## Whale tagging
 
-We use the following deffinition of a whale: unidentified depositor responsible for 100+ validators. The tool will tag the whale with the `whale_0x....` tag (first 4 characters of the depositor address).
+We use the following definition of a whale: unidentified depositor responsible for [`WHALE_THRESHOLD`](https://github.com/migalabs/eth-pokhar?tab=readme-ov-file#identify) validators. The tool will tag the whale with the `whale_0x....` tag (first 4 characters of the depositor address).
 
 ## Identification priority
 
