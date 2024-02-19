@@ -155,7 +155,7 @@ This table has the columns `f_validator_pubkey` and `f_pool_name`. The `identify
 
 ## Whale tagging
 
-We use the following definition of a whale: unidentified depositor responsible for [`WHALE_THRESHOLD`](https://github.com/migalabs/eth-pokhar?tab=readme-ov-file#identify) validators. The tool will tag the whale with the `whale_0x....` tag (first 4 characters of the depositor address).
+We use the following definition of a whale: unidentified depositor responsible for at least [`WHALE_THRESHOLD`](https://github.com/migalabs/eth-pokhar?tab=readme-ov-file#identify) validators. The tool will tag the whale with the `whale_0x....` tag (first 4 characters of the depositor address).
 
 ## Identification priority
 
