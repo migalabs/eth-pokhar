@@ -81,6 +81,14 @@ Finally, run the tool with the following command:
 docker-compose up -d
 ```
 
+In case that you don't want to update de depositor transactions (which can take up to 20 hours), you can run the following command:
+
+```bash
+ONLY_DEPOSITS=true docker-compose up -d
+```
+
+This will set the [`--only-deposits`](#beacon_depositors_transactions) flag to true.
+
 ## Output
 
 The tool will create a database with the following tables:
