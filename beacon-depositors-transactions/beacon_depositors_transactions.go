@@ -89,7 +89,7 @@ func (b *BeaconDepositorsTransactions) Run() {
 		log.Infof("Finished downloading new beacon deposits in %f seconds", duration)
 
 	}
-	if !b.stop {
+	if !b.stop && !b.iConfig.OnlyDeposits {
 		initTime := time.Now()
 		log.Info("Updating depositors transactions...")
 		b.updateDepositorsTransactions()
