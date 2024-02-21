@@ -6,23 +6,13 @@ services:
       context: ./
       dockerfile: Dockerfile
     init: true
-    command: >-
-      "
-      ./eth_pokhar beacon_depositors_transactions
-      --log-level=${LOG_LEVEL}
-      --el-endpoint=${EL_ENDPOINT}
-      --db-url=${DB_URL}
-      --workers-num=${WORKER_NUM}
-      --alchemy-url=${ALCHEMY_URL}
-      &&
-      ./eth_pokhar identify
-      --log-level=${LOG_LEVEL}
-      --el-endpoint=${EL_ENDPOINT}
-      --db-url=${DB_URL}
-      --workers-num=${WORKER_NUM}
-      --alchemy-url=${ALCHEMY_URL}
-      --recreate-table"
-      --whale-threshold=${WHALE_THRESHOLD}
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL}
+      - EL_ENDPOINT=${EL_ENDPOINT}
+      - DB_URL=${DB_URL}
+      - WORKER_NUM=${WORKER_NUM}
+      - ALCHEMY_URL=${ALCHEMY_URL}
+      - WHALE_THRESHOLD=${WHALE_THRESHOLD}
     network_mode: "host"
     depends_on:
       db:
