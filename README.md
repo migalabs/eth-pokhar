@@ -134,7 +134,7 @@ This table stores the validators that are participating in the Rocketpool pool. 
 
 ### `t_identified_validators` (End result)
 
-This table stores the validators with the pool/entity that operates them. Unidentified validators will have a `f_pool_name` value of `others`. It has the following columns:
+This table stores the validators with the pool/entity that operates them. Unidentified validators, non-whales (see [Whale tagging](#whale-tagging)) will have a `f_pool_name` value of `solo_stakers`. It has the following columns:
 
 - `f_validator_pubkey`: The public key of the validator.
 - `f_pool_name`: The name of the pool in which the validators are participating.
