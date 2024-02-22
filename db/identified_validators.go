@@ -5,7 +5,7 @@ import "github.com/pkg/errors"
 const (
 	addNewValidatorsQuery = `
 		INSERT INTO t_identified_validators (f_validator_pubkey, f_pool_name)
-		SELECT DISTINCT F_VALIDATOR_PUBKEY, 'others'::text
+		SELECT DISTINCT F_VALIDATOR_PUBKEY, 'solo_stakers'::text
 		FROM T_BEACON_DEPOSITS
 		WHERE F_VALIDATOR_PUBKEY != ''
 		ON CONFLICT (f_validator_pubkey) DO NOTHING;
