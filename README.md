@@ -151,7 +151,7 @@ This table has the columns `f_depositor` and `f_pool_name`. The `identify` comma
 
 ### `t_validators_insert`
 
-This table has the columns `f_validator_pubkey` and `f_pool_name`. The `identify` command will use this table to identify the pool in which the validators are participating. The `f_validator_pubkey` column is the address of the validator and the `f_pool_name` is the name of the pool in which the validators are participating. These values will be used to tag the validators.
+This table has the columns `f_validator_pubkey` and `f_pool_name`. The `identify` command will use this table to identify the pool in which the validators are participating. The `f_validator_pubkey` column is the address of the validator and the `f_pool_name` is the name of the pool in which the validators are participating. These values will be used to tag the validators and will override any other tag that the validator might have been given.
 
 ## Whale tagging
 

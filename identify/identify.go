@@ -104,16 +104,6 @@ func (i *Identify) Run() {
 
 	if !i.stop {
 		startTime := time.Now()
-		log.Info("Applying validators insert")
-		err := i.dbClient.ApplyValidatorsInsert()
-		if err != nil {
-			log.Fatalf("Error applying validators insert: %v", err)
-		}
-		endTime := time.Now()
-		log.Infof("Applied validators insert in %v", endTime.Sub(startTime))
-	}
-	if !i.stop {
-		startTime := time.Now()
 		log.Info("Applying depositors insert")
 		err := i.dbClient.ApplyDepositorsInsert()
 		if err != nil {
@@ -159,6 +149,17 @@ func (i *Identify) Run() {
 		i.IdentifyLidoValidators()
 		endTime := time.Now()
 		log.Infof("Identified lido validators in %v", endTime.Sub(startTime))
+	}
+
+	if !i.stop {
+		startTime := time.Now()
+		log.Info("Applying validators insert")
+		err := i.dbClient.ApplyValidatorsInsert()
+		if err != nil {
+			log.Fatalf("Error applying validators insert: %v", err)
+		}
+		endTime := time.Now()
+		log.Infof("Applied validators insert in %v", endTime.Sub(startTime))
 	}
 
 	endTime := time.Now()
