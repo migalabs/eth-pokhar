@@ -41,6 +41,7 @@ OPTIONS:
    --log-level value    Log level: debug, warn, info, error (default: info) [$LOG_LEVEL]
    --workers-num value  Number of workers to process API requests (default: 10) [$WORKER_NUM]
    --alchemy-url value  Alchemy url (default: https://eth-mainnet.g.alchemy.com/v2/KEY) [$ALCHEMY_URL]
+   --only-deposits      Only fetch deposits. If not set, it will fetch all new depositor transactions which can take up to 20 hours (default: false)
    --help, -h           show help
 ```
 
@@ -187,7 +188,7 @@ Utilizing Alchemy as EL node and API, with a local database, these are the bench
   - Total time: 4h 51m
 - Total time for the first run: 21h 29m
 
-If running the tool on a weekly basis, expect the tool to take around 16h to run considering that the process of fetching depositors transactions will be done on every run.
+If running the tool on a weekly basis, expect the tool to take around 16h to run considering that the process of fetching depositors transactions will be done on every run unless the `--only-deposits` flag is set, in which case the tool will take around 10m to run.
 
 The size of the fully synced database is around 3GB.
 

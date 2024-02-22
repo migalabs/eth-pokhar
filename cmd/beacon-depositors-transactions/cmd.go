@@ -49,6 +49,10 @@ var BeaconDepositorsTransactionsCommand = &cli.Command{
 			EnvVars:     []string{"ALCHEMY_URL"},
 			DefaultText: "https://eth-mainnet.g.alchemy.com/v2/KEY",
 		},
+		&cli.BoolFlag{
+			Name:  "only-deposits",
+			Usage: "Only fetch deposits. If not set, it will fetch all new depositor transactions which can take up to 20 hours",
+		},
 	},
 }
 

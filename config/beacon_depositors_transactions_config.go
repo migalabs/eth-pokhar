@@ -5,11 +5,12 @@ import (
 )
 
 type BeaconDepositorsTransactionsConfig struct {
-	LogLevel   string `json:"log-level"`
-	ElEndpoint string `json:"el-endpoint"`
-	DBUrl      string `json:"db-url"`
-	Workers    int    `json:"workers-num"`
-	AlchemyURL string `json:"alchemy-url"`
+	LogLevel     string `json:"log-level"`
+	ElEndpoint   string `json:"el-endpoint"`
+	DBUrl        string `json:"db-url"`
+	Workers      int    `json:"workers-num"`
+	AlchemyURL   string `json:"alchemy-url"`
+	OnlyDeposits bool   `json:"only-deposits"`
 }
 
 func NewBeaconDepositorsTransactionsConfig() *BeaconDepositorsTransactionsConfig {
@@ -41,6 +42,10 @@ func (c *BeaconDepositorsTransactionsConfig) Apply(ctx *cli.Context) {
 	}
 	if ctx.IsSet("alchemy-url") {
 		c.AlchemyURL = ctx.String("alchemy-url")
+	}
+
+	if ctx.IsSet("only-deposits") {
+		c.OnlyDeposits = true
 	}
 
 }
