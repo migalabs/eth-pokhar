@@ -22,6 +22,7 @@ services:
       restart_policy:
         condition: on-failure
         max_attempts: 5
+    entrypoint: ["sh", "./run.sh"]
 
   db:
     image: postgres
