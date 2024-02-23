@@ -63,7 +63,7 @@ OPTIONS:
    --help, -h               show help
 ```
 
-## Running with Docker (recommended)
+## Running with docker-compose (recommended)
 
 To run the tool with docker, you can use the following commands:
 
@@ -81,7 +81,7 @@ Finally, run the tool with the following command:
 docker-compose up -d
 ```
 
-In case that you don't want to update de depositor transactions (which can take up to 20 hours), you can run the following command:
+In case that you don't want to update de depositor transactions (which can take up to 20 hours), you can set `ONLY_DEPOSITS=true` in the `.env` file and run the tool normally or use the following command:
 
 ```bash
 ONLY_DEPOSITS=true docker-compose up -d
