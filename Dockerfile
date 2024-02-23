@@ -12,4 +12,4 @@ COPY --from=builder /app/build/eth_pokhar ./
 COPY --from=builder /app/db/migrations ./db/migrations
 COPY --from=builder /app/run.sh ./run.sh
 RUN chmod +x ./run.sh
-CMD [ "sh", "./run.sh" ]
+ENTRYPOINT [ "./eth_pokhar" ]
