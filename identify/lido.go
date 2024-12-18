@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"sync"
 
+	db "github.com/migalabs/eth-pokhar/db"
 	"github.com/migalabs/eth-pokhar/lido/curated"
 	log "github.com/sirupsen/logrus"
 )
@@ -25,7 +26,7 @@ func (i *Identify) IdentifyLidoValidators() error {
 // identifyCuratedModule identifies the validators for the curated module and adds them to the lido table
 func (i *Identify) identifyCuratedModule() error {
 
-	operatorsValidatorCount, err := i.dbClient.ObtainLidoOperatorsValidatorCount()
+	operatorsValidatorCount, err := i.dbClient.ObtainLidoOperatorsValidatorCount(db.LidoProtocolCurated)
 	if err != nil {
 		return err
 	}
@@ -126,7 +127,7 @@ func (i *Identify) processOperatorKeys(operator curated.NodeOperator, operatorVa
 		remainingKeys--
 		if batchIndex == batchSize-1 || isLastKey {
 			log.Debugf("Inserting %v keys for operator %v into the database", batchSize, operatorName)
-			count := i.dbClient.CopyLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys)
+			count := i.dbClient.CopyLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolCurated)
 			log.Debugf("Inserted %v validators for operator %v. %v remaining", count, operatorName, remainingKeys)
 			validatorPubkeys = nil
 			savedKeys += int64(batchSize)
