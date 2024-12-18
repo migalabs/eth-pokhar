@@ -8,6 +8,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+const PublicKeyLength = 48
+
 func RetryContractCall(call func() (interface{}, error)) (interface{}, error) {
 	retry := 0
 	for {
