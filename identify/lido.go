@@ -74,7 +74,10 @@ func (i *Identify) identifyCSM() error {
 		}
 		go func(operator csm.NodeOperatorCustom, savedOperatorValidatorCount uint64) {
 			defer wg.Done()
-			i.processCSMOperatorKeys(operator, savedOperatorValidatorCount)
+			err := i.processCSMOperatorKeys(operator, savedOperatorValidatorCount)
+			if err != nil {
+				log.Fatalf("Error processing operator keys: %v", err)
+			}
 			<-workerSemaphore
 		}(operator, savedOperatorValidatorCount)
 	}

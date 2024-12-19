@@ -146,7 +146,10 @@ func (i *Identify) Run() {
 	if !i.stop {
 		startTime := time.Now()
 		log.Info("Identifying lido validators")
-		i.IdentifyLidoValidators()
+		err := i.IdentifyLidoValidators()
+		if err != nil {
+			log.Fatalf("Error identifying lido validators: %v", err)
+		}
 		endTime := time.Now()
 		log.Infof("Identified lido validators in %v", endTime.Sub(startTime))
 	}
