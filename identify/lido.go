@@ -100,6 +100,13 @@ func (i *Identify) identifyCSM() error {
 
 func (i *Identify) processCSMOperatorKeys(operator csm.NodeOperatorCustom, savedOperatorValidatorCount uint64) error {
 	savedOperatorValidatorCount32 := uint32(savedOperatorValidatorCount)
+	operatorName := csm.GetOperatorName(operator)
+	log.Infof("Getting new keys for operator %v", operatorName)
+	remainingKeys := operator.Operator.TotalDepositedKeys - savedOperatorValidatorCount32
+	if remainingKeys == 0 {
+		log.Infof("No new keys for operator %v", operatorName)
+		return nil
+	}
 
 	log.Debug("Creating a new instance of LidoContract")
 	lidoContract, err := csm.NewCSMContract(i.iConfig.ElEndpoint)
@@ -108,17 +115,6 @@ func (i *Identify) processCSMOperatorKeys(operator csm.NodeOperatorCustom, saved
 		return err
 	}
 	log.Debug("Created a new instance of LidoContract")
-
-	operatorName := csm.GetOperatorName(operator)
-	log.Infof("Getting new keys for operator %v", operatorName)
-	validKeysCount := operator.Operator.TotalAddedKeys - operator.Operator.EnqueuedCount
-
-	if validKeysCount-savedOperatorValidatorCount32 == 0 {
-		log.Infof("No new keys for operator %v", operatorName)
-		return nil
-	}
-	remainingKeys := validKeysCount - savedOperatorValidatorCount32
-
 	keys, err := lidoContract.GetOperatorKeys(operator, uint64(savedOperatorValidatorCount32), uint64(remainingKeys))
 	if err != nil {
 		return err
