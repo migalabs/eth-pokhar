@@ -11,11 +11,16 @@ import (
 
 const (
 	selectLidoOperatorsValidatorCount = `
-	SELECT count(*)
-	FROM t_lido
-	WHERE f_protocol=$1
-	GROUP BY f_operator_index
-	ORDER BY f_operator_index ASC;
+	WITH operators_sequence AS (
+		SELECT generate_series(0, (SELECT MAX(f_operator_index) FROM t_lido WHERE f_protocol=$1)) AS sequence_number
+	)
+	SELECT 
+		COUNT(l.f_operator_index) as count
+	FROM operators_sequence os
+	LEFT JOIN t_lido l ON os.sequence_number = l.f_operator_index 
+		AND l.f_protocol = $1
+	GROUP BY os.sequence_number
+	ORDER BY os.sequence_number ASC;
 	`
 
 	identifyLidoValidators = `
