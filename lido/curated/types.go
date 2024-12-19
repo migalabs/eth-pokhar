@@ -13,8 +13,8 @@ type NodeOperator struct {
 	UsedSigningKeys   uint64
 }
 
-type OperatorKey struct {
-	Key              []byte
-	DepositSignature []byte
-	Used             bool
+type OperatorKeys struct {
+	PubKeys    []byte
+	Signatures []byte
+	Used       []bool
 }

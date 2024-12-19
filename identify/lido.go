@@ -6,12 +6,13 @@ import (
 	"sync"
 
 	db "github.com/migalabs/eth-pokhar/db"
+	"github.com/migalabs/eth-pokhar/lido"
 	"github.com/migalabs/eth-pokhar/lido/csm"
 	"github.com/migalabs/eth-pokhar/lido/curated"
 	log "github.com/sirupsen/logrus"
 )
 
-const maxBatchSize = 100
+const maxBatchSize = 500
 
 func (i *Identify) IdentifyLidoValidators() error {
 	log.Debug("Identifying lido curated module validators")
@@ -208,41 +209,40 @@ func (i *Identify) processCuratedOperatorKeys(operator curated.NodeOperator, ope
 
 	operatorName := curated.GetOperatorName(operator)
 	log.Infof("Getting new keys for operator %v", operatorName)
-	if operator.TotalSigningKeys-operatorValidatorCount == 0 {
+	remainingKeys := operator.TotalSigningKeys - operatorValidatorCount
+	if remainingKeys == 0 {
 		log.Infof("No new keys for operator %v", operatorName)
 		return nil
 	}
-	remainingKeys := operator.TotalSigningKeys - operatorValidatorCount
 	savedKeys := int64(0)
 	var validatorPubkeys []string
-	var batchSize uint64
-	var batchIndex uint64
-	for keyIndex := operatorValidatorCount; keyIndex < operator.TotalSigningKeys; keyIndex++ {
+
+	offset := operatorValidatorCount
+	for {
 		if i.stop {
 			break
 		}
-		if validatorPubkeys == nil {
-			batchIndex = 0
-			batchSize = min(remainingKeys, maxBatchSize)
-			validatorPubkeys = make([]string, batchSize)
-		}
+		limit := min(remainingKeys-offset, maxBatchSize)
+		validatorPubkeys = make([]string, limit)
 
-		key, err := lidoContract.GetOperatorKey(operator, keyIndex)
+		operatorKeys, err := lidoContract.GetOperatorKeys(operator, offset, limit)
 		if err != nil {
 			return err
 		}
-		validatorPubkeys[batchIndex] = hex.EncodeToString(key.Key)
-		isLastKey := keyIndex == operator.TotalSigningKeys-1
-		remainingKeys--
-		if batchIndex == batchSize-1 || isLastKey {
-			log.Debugf("Inserting %v keys for operator %v into the database", batchSize, operatorName)
-			count := i.dbClient.CopyLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolCurated)
-			log.Debugf("Inserted %v validators for operator %v. %v remaining", count, operatorName, remainingKeys)
-			validatorPubkeys = nil
-			savedKeys += int64(batchSize)
-		} else {
-			batchIndex++
+		for i := uint64(0); i < limit; i++ {
+			key := operatorKeys.PubKeys[i*lido.PublicKeyLength : (i+1)*lido.PublicKeyLength]
+			validatorPubkeys[i] = hex.EncodeToString(key)
 		}
+
+		log.Debugf("Inserting %v keys for operator %v into the database", limit, operatorName)
+		count := i.dbClient.CopyLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolCurated)
+		log.Debugf("Inserted %v validators for operator %v. %v remaining", count, operatorName, remainingKeys)
+		savedKeys += count
+		done := limit < maxBatchSize
+		if done {
+			break
+		}
+		offset += limit
 	}
 	log.Infof("Got %v new keys for operator %v", savedKeys, operatorName)
 
