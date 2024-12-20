@@ -1,2 +1,2 @@
 ALTER TABLE t_lido
-REMOVE COLUMN f_protocol;
+DROP COLUMN f_protocol;
