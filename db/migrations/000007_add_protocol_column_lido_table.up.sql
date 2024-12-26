@@ -1,0 +1,2 @@
+ALTER TABLE t_lido
+ADD COLUMN f_protocol TEXT NOT NULL DEFAULT 'curated';

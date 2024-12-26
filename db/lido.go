@@ -11,10 +11,16 @@ import (
 
 const (
 	selectLidoOperatorsValidatorCount = `
-	SELECT count(*)
-	FROM t_lido
-	GROUP BY f_operator_index
-	ORDER BY f_operator_index ASC;
+	WITH operators_sequence AS (
+		SELECT generate_series(0, (SELECT MAX(f_operator_index) FROM t_lido WHERE f_protocol=$1)) AS sequence_number
+	)
+	SELECT 
+		COUNT(l.f_operator_index) as count
+	FROM operators_sequence os
+	LEFT JOIN t_lido l ON os.sequence_number = l.f_operator_index 
+		AND l.f_protocol = $1
+	GROUP BY os.sequence_number
+	ORDER BY os.sequence_number ASC;
 	`
 
 	identifyLidoValidators = `
@@ -23,6 +29,8 @@ const (
 	FROM t_lido
 	WHERE t_identified_validators.f_validator_pubkey = t_lido.f_validator_pubkey;
 	`
+	LidoProtocolCurated = "curated"
+	LidoProtocolCSM     = "csm"
 )
 
 // IdentifyLidoValidators identifies the lido validators and adds them to the identified validators table
@@ -44,14 +52,14 @@ func (p *PostgresDBService) IdentifyLidoValidators() error {
 }
 
 // Obtain LidoOperatorsValidatorCount returns the number of validators in the Lido table for each operator
-func (p *PostgresDBService) ObtainLidoOperatorsValidatorCount() ([]uint64, error) {
+func (p *PostgresDBService) ObtainLidoOperatorsValidatorCount(protocol string) ([]uint64, error) {
 	conn, err := p.psqlPool.Acquire(p.ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "error acquiring database connection")
 	}
 	defer conn.Release()
 
-	rows, err := conn.Query(p.ctx, selectLidoOperatorsValidatorCount)
+	rows, err := conn.Query(p.ctx, selectLidoOperatorsValidatorCount, protocol)
 	if err != nil {
 		return nil, errors.Wrap(err, "error obtaining validator count from database")
 	}
@@ -70,7 +78,7 @@ func (p *PostgresDBService) ObtainLidoOperatorsValidatorCount() ([]uint64, error
 }
 
 // CopyLidoOperatorValidators copies the validators to the database for a given operator
-func (p *PostgresDBService) CopyLidoOperatorValidators(operator string, operatorIndex uint64, rowSrc []string) int64 {
+func (p *PostgresDBService) CopyLidoOperatorValidators(operator string, operatorIndex uint64, rowSrc []string, protocol string) int64 {
 	if len(rowSrc) == 0 {
 		return 0
 	}
@@ -86,7 +94,7 @@ func (p *PostgresDBService) CopyLidoOperatorValidators(operator string, operator
 
 	var validators [][]interface{}
 	for _, row := range rowSrc {
-		validators = append(validators, []interface{}{row, operator, operatorIndex})
+		validators = append(validators, []interface{}{row, operator, operatorIndex, protocol})
 	}
 
 	// Acquire a database connection
@@ -101,7 +109,8 @@ func (p *PostgresDBService) CopyLidoOperatorValidators(operator string, operator
 		CREATE TEMP TABLE IF NOT EXISTS `+tempTableName+` (
 			f_validator_pubkey text,
 			f_operator text,
-			f_operator_index integer
+			f_operator_index integer,
+			f_protocol text
 		);
 	`)
 	if err != nil {
@@ -109,15 +118,15 @@ func (p *PostgresDBService) CopyLidoOperatorValidators(operator string, operator
 	}
 
 	// Copy the data to the temporary table
-	_, err = conn.CopyFrom(p.ctx, pgx.Identifier{tempTableName}, []string{"f_validator_pubkey", "f_operator", "f_operator_index"}, pgx.CopyFromRows(validators))
+	_, err = conn.CopyFrom(p.ctx, pgx.Identifier{tempTableName}, []string{"f_validator_pubkey", "f_operator", "f_operator_index", "f_protocol"}, pgx.CopyFromRows(validators))
 	if err != nil {
 		wlog.Fatalf("error copying data to temporary table: %v", err)
 	}
 
 	// Insert the data from the temporary table to the main table
 	count, err := conn.Exec(p.ctx, `
-		INSERT INTO t_lido (f_validator_pubkey, f_operator, f_operator_index)
-		SELECT f_validator_pubkey, f_operator, f_operator_index
+		INSERT INTO t_lido (f_validator_pubkey, f_operator, f_operator_index, f_protocol)
+		SELECT f_validator_pubkey, f_operator, f_operator_index, f_protocol
 		FROM `+tempTableName+`
 		ON CONFLICT (f_validator_pubkey) DO NOTHING;
 	`)

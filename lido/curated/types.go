@@ -1,4 +1,4 @@
-package lido
+package curated
 
 import "github.com/ethereum/go-ethereum/common"
 
