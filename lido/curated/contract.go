@@ -115,22 +115,22 @@ func (l *CuratedModuleContract) GetOperatorData(index *big.Int) (NodeOperator, e
 	}, nil
 }
 
-func (l *CuratedModuleContract) GetOperatorKey(operator NodeOperator, keyIndex uint64) (OperatorKey, error) {
+func (l *CuratedModuleContract) GetOperatorKeys(operator NodeOperator, offset uint64, limit uint64) (OperatorKeys, error) {
 	result, err := lido.RetryContractCall(func() (interface{}, error) {
-		return l.contract.GetSigningKey(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(keyIndex)))
+		return l.contract.GetSigningKeys(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(offset)), big.NewInt(int64(limit)))
 	})
 	if err != nil {
-		return OperatorKey{}, err
+		return OperatorKeys{}, err
 	}
-	key := result.(struct {
-		Key              []byte
-		DepositSignature []byte
-		Used             bool
+	operatorKeys := result.(struct {
+		Pubkeys    []byte
+		Signatures []byte
+		Used       []bool
 	})
-	return OperatorKey{
-		Key:              key.Key,
-		DepositSignature: key.DepositSignature,
-		Used:             key.Used,
+	return OperatorKeys{
+		PubKeys:    operatorKeys.Pubkeys,
+		Signatures: operatorKeys.Signatures,
+		Used:       operatorKeys.Used,
 	}, nil
 }
 
