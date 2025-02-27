@@ -55,7 +55,7 @@ func (l *CSMContract) GetOperatorData(index *big.Int) (NodeOperatorCustom, error
 
 func (l *CSMContract) GetOperatorKeys(operator NodeOperatorCustom, startIndex uint64, keyCount uint64) ([][]byte, error) {
 	result, err := lido.RetryContractCall(func() (interface{}, error) {
-		return l.contract.GetSigningKeys(nil, big.NewInt(int64(operator.Index)), big.NewInt(0), big.NewInt(int64(keyCount)))
+		return l.contract.GetSigningKeys(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(startIndex)), big.NewInt(int64(keyCount)))
 	})
 	if err != nil {
 		return [][]byte{}, err
