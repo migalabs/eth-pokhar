@@ -30,7 +30,7 @@ func (p *PostgresDBService) ApplyDepositorsInsert() error {
 	}
 	defer conn.Release()
 
-	_, err = conn.Query(p.ctx, applyDepositorsInsertQuery)
+	_, err = conn.Exec(p.ctx, applyDepositorsInsertQuery)
 	if err != nil {
 		return errors.Wrap(err, "error applying validators insert")
 	}
