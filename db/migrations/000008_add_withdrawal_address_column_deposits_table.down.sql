@@ -1,0 +1,2 @@
+ALTER TABLE t_beacon_deposits
+DROP COLUMN f_withdrawal_address;

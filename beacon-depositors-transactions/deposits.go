@@ -76,11 +76,18 @@ func (b *BeaconDepositorsTransactions) processDepositTransfers(transfers []alche
 								errCh <- err
 								return
 							}
+							withdrawalCredentials, ok := event["withdrawal_credentials"].([]byte)
+							if !ok {
+								logger.Errorf("Error parsing withdrawal credentials for tx %s", txHash.String())
+								errCh <- err
+								return
+							}
 							deposit := models.BeaconDeposit{
-								BlockNum:        blockNum,
-								Depositor:       strings.TrimPrefix(transfer.From, utils.AddressPrefix),
-								TxHash:          strings.TrimPrefix(txHash.String(), utils.AddressPrefix),
-								ValidatorPubkey: pubkey,
+								BlockNum:          blockNum,
+								Depositor:         strings.TrimPrefix(transfer.From, utils.AddressPrefix),
+								TxHash:            strings.TrimPrefix(txHash.String(), utils.AddressPrefix),
+								ValidatorPubkey:   pubkey,
+								WithdrawalAddress: hex.EncodeToString(withdrawalCredentials[utils.WithdrawalPrefixLen:]),
 							}
 							depositsCh <- deposit
 						}
