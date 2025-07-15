@@ -72,19 +72,19 @@ First, create a `.env` file on the root folder. You can use the `.env.example` f
 Then, run the following command to build the tool:
 
 ```bash
-docker-compose build
+docker compose build
 ```
 
 Finally, run the tool with the following command:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 In case that you don't want to update de depositor transactions (which can take up to 20 hours), you can set `ONLY_DEPOSITS=true` in the `.env` file and run the tool normally or use the following command:
 
 ```bash
-ONLY_DEPOSITS=true docker-compose up -d
+ONLY_DEPOSITS=true docker compose up -d
 ```
 
 This will set the [`--only-deposits`](#beacon_depositors_transactions) flag to true.
@@ -101,6 +101,7 @@ This table stores the deposits made to the beaconchain contract. It has the foll
 - `f_depositor`: The address of the depositor.
 - `f_tx_hash`: The transaction hash of the deposit.
 - `f_validator_pubkey`: The public key of the validator.
+- `f_withdrawal_address`: The withdrawal address of the validator.
 
 ### `t_beacon_depositors_transactions`
 
@@ -127,6 +128,13 @@ This table stores the validators that are used to identify the pool in which the
 - `f_validator_pubkey`: The public key of the validator.
 - `f_pool_name`: The name of the pool in which the validators are participating.
 
+### `t_withdrawal_address_insert`
+
+This table stores the withdrawal addresses that are used to identify the pool in which the validators are participating. See [Utilizing custom off-chain data](#utilizing-custom-off-chain-data) for more information. It has the following columns:
+
+- `f_withdrawal_address`: The address of the withdrawal address.
+- `f_pool_name`: The name of the pool in which the validators are participating.
+
 ### `t_lido`
 
 This table stores the validators that are participating in the Lido pool. See [Lido operators](https://operatorportal.lido.fi/) for more information. It has the following columns:
@@ -150,7 +158,7 @@ This table stores the validators with the pool/entity that operates them. Uniden
 
 ## Utilizing custom off-chain data
 
-As mentioned before, the tool can be used to identify validators by using off-chain data. For this purpose, two tables are created in the database on the first run: `t_depositors_insert` and `t_validators_insert`.
+As mentioned before, the tool can be used to identify validators by using off-chain data. For this purpose, three tables are created in the database on the first run: `t_depositors_insert`, `t_validators_insert`, and `t_withdrawal_address_insert`.
 
 **Important note**: addresses must be all lowercase and without the `0x` prefix.
 
@@ -161,6 +169,10 @@ This table has the columns `f_depositor` and `f_pool_name`. The `identify` comma
 ### `t_validators_insert`
 
 This table has the columns `f_validator_pubkey` and `f_pool_name`. The `identify` command will use this table to identify the pool in which the validators are participating. The `f_validator_pubkey` column is the address of the validator and the `f_pool_name` is the name of the pool in which the validators are participating. These values will be used to tag the validators and will override any other tag that the validator might have been given.
+
+### `t_withdrawal_address_insert`
+
+This table has the columns `f_withdrawal_address` and `f_pool_name`. The `identify` command will use this table to identify the pool in which the validators are participating. The `f_withdrawal_address` column is the address of the withdrawal address and the `f_pool_name` is the name of the pool in which the validators are participating. All validators that have the same withdrawal address will be tagged with the `f_pool_name` value.
 
 ## Whale tagging
 
