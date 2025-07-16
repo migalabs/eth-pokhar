@@ -35,7 +35,7 @@ func (p *PostgresDBService) ObtainLastDeposit() (models.BeaconDeposit, error) {
 	}
 	deposit := models.BeaconDeposit{}
 	rows.Next()
-	err = rows.Scan(&deposit.BlockNum, &deposit.Depositor, &deposit.TxHash, &deposit.ValidatorPubkey)
+	err = rows.Scan(&deposit.BlockNum, &deposit.Depositor, &deposit.TxHash, &deposit.ValidatorPubkey, &deposit.WithdrawalAddress)
 	if err != nil {
 		log.Errorf("error scanning last deposit: %s", err.Error())
 	}
@@ -71,7 +71,8 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
             f_block_num bigint,
             f_depositor text,
             f_tx_hash text,
-            f_validator_pubkey text
+            f_validator_pubkey text,
+			f_withdrawal_address text NOT NULL DEFAULT ''
         )
     `)
 	if err != nil {
@@ -82,7 +83,7 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 	_, err = conn.CopyFrom(
 		p.ctx,
 		pgx.Identifier{tempTableName},
-		[]string{"f_block_num", "f_depositor", "f_tx_hash", "f_validator_pubkey"},
+		[]string{"f_block_num", "f_depositor", "f_tx_hash", "f_validator_pubkey", "f_withdrawal_address"},
 		pgx.CopyFromRows(deposits),
 	)
 	if err != nil {
@@ -91,8 +92,8 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 
 	// Insert non-duplicate rows from the temporary table into the target table
 	count, err := conn.Exec(p.ctx, `
-        INSERT INTO t_beacon_deposits (f_block_num, f_depositor, f_tx_hash, f_validator_pubkey)
-        SELECT f_block_num, f_depositor, f_tx_hash, f_validator_pubkey
+        INSERT INTO t_beacon_deposits (f_block_num, f_depositor, f_tx_hash, f_validator_pubkey, f_withdrawal_address)
+        SELECT f_block_num, f_depositor, f_tx_hash, f_validator_pubkey, f_withdrawal_address
         FROM `+tempTableName+`
         ON CONFLICT DO NOTHING
     `)
@@ -116,7 +117,7 @@ func beaconDepositToCopyData(rows []models.BeaconDeposit) [][]interface{} {
 	var copyData [][]interface{}
 
 	for _, row := range rows {
-		copyData = append(copyData, []interface{}{row.BlockNum, row.Depositor, row.TxHash, row.ValidatorPubkey})
+		copyData = append(copyData, []interface{}{row.BlockNum, row.Depositor, row.TxHash, row.ValidatorPubkey, row.WithdrawalAddress})
 	}
 
 	return copyData
