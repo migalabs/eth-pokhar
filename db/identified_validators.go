@@ -1,6 +1,10 @@
 package db
 
-import "github.com/pkg/errors"
+import (
+	"strings"
+
+	"github.com/pkg/errors"
+)
 
 const (
 	addNewValidatorsQuery = `
@@ -25,36 +29,39 @@ const (
 				t_beacon_deposits t1
 			RIGHT JOIN (
 				SELECT 
-					f_depositor, 
-					CONCAT('whale_0x', LEFT(f_depositor, 4)) AS whale_id
+					%s, 
+					CONCAT('whale_0x', LEFT(%s, 4)) AS whale_id
 				FROM (
 					SELECT
 						COUNT(*) AS COUNT,
-						F_DEPOSITOR
+						%s
 					FROM
 						(
 							SELECT DISTINCT
 								F_VALIDATOR_PUBKEY,
-								F_DEPOSITOR
+								%s
 							FROM
 								T_BEACON_DEPOSITS
 							WHERE
 								F_VALIDATOR_PUBKEY != ''
 						) aux
 					GROUP BY
-						F_DEPOSITOR
+						%s
 				) AS count_subquery
 				WHERE 
 					count >= $1
 			) AS subquery
 			ON 
-				t1.f_depositor = subquery.f_depositor
+				t1.%s = subquery.%s
 			WHERE 
 				F_VALIDATOR_PUBKEY != ''
 		) AS subquery2
 		WHERE 
 			t_identified_validators.f_validator_pubkey = subquery2.f_validator_pubkey;
 		`
+
+	depositorsColumnName        = "f_depositor"
+	withdrawalAddressColumnName = "f_withdrawal_address"
 )
 
 func (p *PostgresDBService) AddNewValidators() error {
@@ -96,9 +103,17 @@ func (p *PostgresDBService) IdentifyWhales(threshold int) error {
 	}
 	defer conn.Release()
 
-	_, err = conn.Exec(p.ctx, identifyWhalesQuery, threshold)
+	withdrawalAddressQuery := strings.ReplaceAll(identifyWhalesQuery, "%s", withdrawalAddressColumnName)
+
+	_, err = conn.Exec(p.ctx, withdrawalAddressQuery, threshold)
 	if err != nil {
-		return errors.Wrap(err, "error identifying whales")
+		return errors.Wrap(err, "error identifying withdrawal address whales")
+	}
+
+	depositorsQuery := strings.ReplaceAll(identifyWhalesQuery, "%s", depositorsColumnName)
+	_, err = conn.Exec(p.ctx, depositorsQuery, threshold)
+	if err != nil {
+		return errors.Wrap(err, "error identifying depositor whales")
 	}
 	return nil
 }
