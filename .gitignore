@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# Main binary
+eth-pokhar
+
 # Test binary, build with `go test -c`
 *.test
 

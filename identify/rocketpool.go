@@ -119,6 +119,12 @@ func getMinipoolAddressesWithErrorHandling(rp *rocketpool.RocketPool, startFrom 
 	if err != nil {
 		return []common.Address{}, err
 	}
+
+	// Check bounds to prevent panic when startFrom >= minipoolCount
+	if startFrom >= minipoolCount {
+		return []common.Address{}, nil
+	}
+
 	// Load minipool addresses in batches
 	addresses := make([]common.Address, minipoolCount-startFrom)
 	for bsi := startFrom; bsi < minipoolCount; bsi += minipool.MinipoolAddressBatchSize {
