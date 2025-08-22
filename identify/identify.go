@@ -154,16 +154,16 @@ func (i *Identify) Run() {
 		}
 		log.Info("Identified rocketpool validators")
 	}
-	// if !i.stop {
-	// 	startTime := time.Now()
-	// 	log.Info("Identifying lido validators")
-	// 	err := i.IdentifyLidoValidators()
-	// 	if err != nil {
-	// 		log.Fatalf("Error identifying lido validators: %v", err)
-	// 	}
-	// 	endTime := time.Now()
-	// 	log.Infof("Identified lido validators in %v", endTime.Sub(startTime))
-	// }
+	if !i.stop {
+		startTime := time.Now()
+		log.Info("Identifying lido validators")
+		err := i.IdentifyLidoValidators()
+		if err != nil {
+			log.Fatalf("Error identifying lido validators: %v", err)
+		}
+		endTime := time.Now()
+		log.Infof("Identified lido validators in %v", endTime.Sub(startTime))
+	}
 
 	if !i.stop {
 		startTime := time.Now()
