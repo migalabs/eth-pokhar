@@ -133,10 +133,11 @@ func (i *Identify) Run() {
 		log.Info("Identifying coinbase validators")
 		err := i.dbClient.IdentifyCoinbaseValidators()
 		if err != nil {
-			log.Fatalf("Error identifying coinbase validators: %v", err)
+			log.Errorf("Error identifying coinbase validators: %v. Skipping to next step.", err)
+		} else {
+			endTime := time.Now()
+			log.Infof("Identified coinbase validators in %v", endTime.Sub(startTime))
 		}
-		endTime := time.Now()
-		log.Infof("Identified coinbase validators in %v", endTime.Sub(startTime))
 	}
 
 	if !i.stop {
