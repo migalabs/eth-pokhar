@@ -85,10 +85,11 @@ func (i *Identify) Run() {
 		log.Info("Adding new validators to database")
 		err := i.dbClient.AddNewValidators()
 		if err != nil {
-			log.Fatalf("Error adding new validators to database: %v", err)
+			log.Errorf("Error adding new validators to database: %v. Skipping to next step.", err)
+		} else {
+			endTime := time.Now()
+			log.Infof("Added new validators to database in %v", endTime.Sub(startTime))
 		}
-		endTime := time.Now()
-		log.Infof("Added new validators to database in %v", endTime.Sub(startTime))
 	}
 
 	if !i.stop {
