@@ -136,8 +136,9 @@ func getMinipoolAddressesWithErrorHandling(rp *rocketpool.RocketPool, startFrom 
 			mei = minipoolCount
 		}
 
-		// Load addresses
+		// Load addresses with limited concurrency to avoid overwhelming the EL node
 		var wg errgroup.Group
+		wg.SetLimit(5)
 		for mi := msi; mi < mei; mi++ {
 			mi := mi
 			wg.Go(func() error {
