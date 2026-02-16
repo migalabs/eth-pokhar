@@ -109,10 +109,11 @@ func (i *Identify) Run() {
 		log.Info("Applying withdrawal address insert")
 		err := i.dbClient.ApplyWithdrawalAddressInsert()
 		if err != nil {
-			log.Fatalf("Error applying withdrawal address insert: %v", err)
+			log.Errorf("Error applying withdrawal address insert: %v. Skipping to next step.", err)
+		} else {
+			endTime := time.Now()
+			log.Infof("Applied withdrawal address insert in %v", endTime.Sub(startTime))
 		}
-		endTime := time.Now()
-		log.Infof("Applied withdrawal address insert in %v", endTime.Sub(startTime))
 	}
 
 	if !i.stop {
