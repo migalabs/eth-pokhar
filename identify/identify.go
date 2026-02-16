@@ -74,10 +74,11 @@ func (i *Identify) Run() {
 		log.Info("Truncating identified validators table")
 		err := i.dbClient.TruncateIdentifiedValidators()
 		if err != nil {
-			log.Fatalf("Error truncating identified validators table: %v", err)
+			log.Errorf("Error truncating identified validators table: %v. Skipping to next step.", err)
+		} else {
+			endTime := time.Now()
+			log.Infof("Truncated identified validators table in %v", endTime.Sub(startTime))
 		}
-		endTime := time.Now()
-		log.Infof("Truncated identified validators table in %v", endTime.Sub(startTime))
 	}
 
 	if !i.stop {
