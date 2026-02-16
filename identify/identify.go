@@ -141,18 +141,19 @@ func (i *Identify) Run() {
 
 		newRocketpoolKeys, err := i.GetRocketPoolKeys()
 		if err != nil {
-			log.Fatalf("Error identifying rocketpool validators: %v", err)
+			log.Errorf("Error identifying rocketpool validators: %v. Continuing with remaining steps.", err)
+		} else {
+			log.WithFields(log.Fields{
+				"NewDetectedKeys": len(newRocketpoolKeys),
+				"Duration (s)":    time.Since(startTime),
+			}).Info("RocketPool Keys:")
+			i.dbClient.CopyRocketpoolValidators(newRocketpoolKeys)
+			err = i.dbClient.IdentifyRocketpoolValidators()
+			if err != nil {
+				log.Errorf("Error identifying rocketpool validators in DB: %v. Continuing with remaining steps.", err)
+			}
+			log.Info("Identified rocketpool validators")
 		}
-		log.WithFields(log.Fields{
-			"NewDetectedKeys": len(newRocketpoolKeys),
-			"Duration (s)":    time.Since(startTime),
-		}).Info("RocketPool Keys:")
-		i.dbClient.CopyRocketpoolValidators(newRocketpoolKeys)
-		err = i.dbClient.IdentifyRocketpoolValidators()
-		if err != nil {
-			log.Fatalf("Error identifying rocketpool validators: %v", err)
-		}
-		log.Info("Identified rocketpool validators")
 	}
 	if !i.stop {
 		startTime := time.Now()
