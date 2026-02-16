@@ -177,10 +177,11 @@ func (i *Identify) Run() {
 		log.Info("Applying validators insert")
 		err := i.dbClient.ApplyValidatorsInsert()
 		if err != nil {
-			log.Fatalf("Error applying validators insert: %v", err)
+			log.Errorf("Error applying validators insert: %v. Skipping to next step.", err)
+		} else {
+			endTime := time.Now()
+			log.Infof("Applied validators insert in %v", endTime.Sub(startTime))
 		}
-		endTime := time.Now()
-		log.Infof("Applied validators insert in %v", endTime.Sub(startTime))
 	}
 
 	endTime := time.Now()
