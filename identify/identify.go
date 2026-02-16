@@ -121,10 +121,11 @@ func (i *Identify) Run() {
 		log.Info("Applying depositors insert")
 		err := i.dbClient.ApplyDepositorsInsert()
 		if err != nil {
-			log.Fatalf("Error applying depositors insert: %v", err)
+			log.Errorf("Error applying depositors insert: %v. Skipping to next step.", err)
+		} else {
+			endTime := time.Now()
+			log.Infof("Applied depositors insert in %v", endTime.Sub(startTime))
 		}
-		endTime := time.Now()
-		log.Infof("Applied depositors insert in %v", endTime.Sub(startTime))
 	}
 
 	if !i.stop {
