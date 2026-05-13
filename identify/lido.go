@@ -9,6 +9,7 @@ import (
 	"github.com/migalabs/eth-pokhar/lido"
 	"github.com/migalabs/eth-pokhar/lido/csm"
 	"github.com/migalabs/eth-pokhar/lido/curated"
+	"github.com/migalabs/eth-pokhar/lido/sdvt"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -22,6 +23,13 @@ func (i *Identify) IdentifyLidoValidators() error {
 	}
 	log.Debug("Identified lido curated module validators")
 
+	log.Debug("Identifying lido SDVT module validators")
+	err = i.identifySDVT()
+	if err != nil {
+		return err
+	}
+	log.Debug("Identified lido SDVT module validators")
+
 	log.Debug("Identifying lido csm validators")
 	err = i.identifyCSM()
 	if err != nil {
@@ -32,14 +40,103 @@ func (i *Identify) IdentifyLidoValidators() error {
 	return nil
 }
 
-///// CSM /////
+///// Simple DVT /////
 
-func (i *Identify) identifyCSM() error {
-	savedOperatorsValidatorsCount, err := i.dbClient.ObtainLidoOperatorsValidatorCount(db.LidoProtocolCSM)
+// identifySDVT identifies the validators for the Simple DVT module. Same key
+// registry semantics as the Curated module — only the contract address and
+// operator name resolution differ. Operator names come from the on-chain
+// contract (no pre-defined override list).
+func (i *Identify) identifySDVT() error {
+	log.Debug("Creating a new instance of SDVT contract")
+	sdvtContract, err := sdvt.NewSDVTContract(i.iConfig.ElEndpoint)
 	if err != nil {
 		return err
 	}
 
+	operatorsCount, err := sdvtContract.GetNodeOperatorsCount()
+	if err != nil {
+		return err
+	}
+	log.Debugf("Found %v SDVT operators", operatorsCount)
+
+	workerSemaphore := make(chan struct{}, 10)
+	var wg sync.WaitGroup
+
+	for operatorIndex := int64(0); operatorIndex < operatorsCount; operatorIndex++ {
+		if i.stop {
+			break
+		}
+		wg.Add(1)
+		workerSemaphore <- struct{}{}
+		operator, err := sdvtContract.GetOperatorData(big.NewInt(operatorIndex))
+		if err != nil {
+			return err
+		}
+
+		go func(operator curated.NodeOperator) {
+			defer wg.Done()
+			if err := i.processSDVTOperatorKeys(operator); err != nil {
+				log.Errorf("Error reconciling SDVT operator %v: %v", operator.Index, err)
+			}
+			<-workerSemaphore
+		}(operator)
+	}
+
+	wg.Wait()
+	if i.stop {
+		return nil
+	}
+
+	err = i.dbClient.IdentifyLidoValidators()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (i *Identify) processSDVTOperatorKeys(operator curated.NodeOperator) error {
+	sdvtContract, err := sdvt.NewSDVTContract(i.iConfig.ElEndpoint)
+	if err != nil {
+		return err
+	}
+
+	operatorName := sdvt.GetOperatorName(operator)
+	totalKeys := operator.TotalSigningKeys
+	log.Infof("Reconciling keys for SDVT operator %v (on-chain total=%v)", operatorName, totalKeys)
+
+	validatorPubkeys := make([]string, 0, totalKeys)
+	offset := uint64(0)
+	for offset < totalKeys {
+		if i.stop {
+			return nil
+		}
+		limit := totalKeys - offset
+		if limit > maxBatchSize {
+			limit = maxBatchSize
+		}
+
+		operatorKeys, err := sdvtContract.GetOperatorKeys(operator, offset, limit)
+		if err != nil {
+			return err
+		}
+		for k := uint64(0); k < limit; k++ {
+			key := operatorKeys.PubKeys[k*lido.PublicKeyLength : (k+1)*lido.PublicKeyLength]
+			validatorPubkeys = append(validatorPubkeys, hex.EncodeToString(key))
+		}
+		offset += limit
+	}
+
+	upserted, removed, renamed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolSDVT)
+	if err != nil {
+		return err
+	}
+	log.Infof("SDVT operator %v reconciled: on-chain=%d upserted=%d removed=%d renamed=%d", operatorName, totalKeys, upserted, removed, renamed)
+	return nil
+}
+
+///// CSM /////
+
+func (i *Identify) identifyCSM() error {
 	log.Debug("Creating a new instance of LidoContract")
 	csmContract, err := csm.NewCSMContract(i.iConfig.ElEndpoint)
 	// Check if there was an error
@@ -69,18 +166,14 @@ func (i *Identify) identifyCSM() error {
 			return err
 		}
 
-		savedOperatorValidatorCount := uint64(0)
-		if operator.Index < uint64(len(savedOperatorsValidatorsCount)) {
-			savedOperatorValidatorCount = savedOperatorsValidatorsCount[operator.Index]
-		}
-		go func(operator csm.NodeOperatorCustom, savedOperatorValidatorCount uint64) {
+		go func(operator csm.NodeOperatorCustom) {
 			defer wg.Done()
-			err := i.processCSMOperatorKeys(operator, savedOperatorValidatorCount)
+			err := i.processCSMOperatorKeys(operator)
 			if err != nil {
 				log.Fatalf("Error processing operator keys: %v", err)
 			}
 			<-workerSemaphore
-		}(operator, savedOperatorValidatorCount)
+		}(operator)
 	}
 	log.Debug("Finished getting keys for each operator")
 
@@ -99,35 +192,31 @@ func (i *Identify) identifyCSM() error {
 	return nil
 }
 
-func (i *Identify) processCSMOperatorKeys(operator csm.NodeOperatorCustom, savedOperatorValidatorCount uint64) error {
-	savedOperatorValidatorCount32 := uint32(savedOperatorValidatorCount)
+func (i *Identify) processCSMOperatorKeys(operator csm.NodeOperatorCustom) error {
 	operatorName := csm.GetOperatorName(operator)
-	log.Infof("Getting new keys for operator %v", operatorName)
-	remainingKeys := operator.Operator.TotalDepositedKeys - savedOperatorValidatorCount32
-	if remainingKeys == 0 {
-		log.Infof("No new keys for operator %v", operatorName)
-		return nil
+	totalKeys := uint64(operator.Operator.TotalDepositedKeys)
+	log.Infof("Reconciling keys for CSM operator %v (on-chain total=%v)", operatorName, totalKeys)
+
+	keysString := make([]string, 0, totalKeys)
+	if totalKeys > 0 {
+		lidoContract, err := csm.NewCSMContract(i.iConfig.ElEndpoint)
+		if err != nil {
+			return err
+		}
+		keys, err := lidoContract.GetOperatorKeys(operator, 0, totalKeys)
+		if err != nil {
+			return err
+		}
+		for _, key := range keys {
+			keysString = append(keysString, hex.EncodeToString(key))
+		}
 	}
 
-	log.Debug("Creating a new instance of LidoContract")
-	lidoContract, err := csm.NewCSMContract(i.iConfig.ElEndpoint)
-	// Check if there was an error
+	upserted, removed, renamed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, keysString, db.LidoProtocolCSM)
 	if err != nil {
 		return err
 	}
-	log.Debug("Created a new instance of LidoContract")
-	keys, err := lidoContract.GetOperatorKeys(operator, uint64(savedOperatorValidatorCount32), uint64(remainingKeys))
-	if err != nil {
-		return err
-	}
-	keysString := make([]string, len(keys))
-	for i, key := range keys {
-		keysString[i] = hex.EncodeToString(key)
-	}
-	count := i.dbClient.CopyLidoOperatorValidators(operatorName, operator.Index, keysString, db.LidoProtocolCSM)
-	log.Debugf("Inserted %v validators for operator %v", count, operatorName)
-	log.Infof("Got %v new keys for operator %v", remainingKeys, operatorName)
-
+	log.Infof("CSM operator %v reconciled: on-chain=%d upserted=%d removed=%d renamed=%d", operatorName, totalKeys, upserted, removed, renamed)
 	return nil
 }
 
@@ -135,12 +224,6 @@ func (i *Identify) processCSMOperatorKeys(operator csm.NodeOperatorCustom, saved
 
 // identifyCuratedModule identifies the validators for the curated module and adds them to the lido table
 func (i *Identify) identifyCuratedModule() error {
-
-	operatorsValidatorCount, err := i.dbClient.ObtainLidoOperatorsValidatorCount(db.LidoProtocolCurated)
-	if err != nil {
-		return err
-	}
-
 	log.Debug("Creating a new instance of LidoContract")
 	lidoContract, err := curated.NewCuratedModuleContract(i.iConfig.ElEndpoint)
 	// Check if there was an error
@@ -171,15 +254,13 @@ func (i *Identify) identifyCuratedModule() error {
 			return err
 		}
 
-		operatorValidatorCount := uint64(0)
-		if operator.Index < uint64(len(operatorsValidatorCount)) {
-			operatorValidatorCount = operatorsValidatorCount[operator.Index]
-		}
-		go func(operator curated.NodeOperator, operatorValidatorCount uint64) {
+		go func(operator curated.NodeOperator) {
 			defer wg.Done()
-			i.processCuratedOperatorKeys(operator, operatorValidatorCount)
+			if err := i.processCuratedOperatorKeys(operator); err != nil {
+				log.Errorf("Error reconciling curated operator %v: %v", operator.Index, err)
+			}
 			<-workerSemaphore
-		}(operator, operatorValidatorCount)
+		}(operator)
 	}
 	log.Debug("Finished getting keys for each operator")
 
@@ -198,53 +279,42 @@ func (i *Identify) identifyCuratedModule() error {
 	return nil
 }
 
-func (i *Identify) processCuratedOperatorKeys(operator curated.NodeOperator, operatorValidatorCount uint64) error {
-	log.Debug("Creating a new instance of LidoContract")
+func (i *Identify) processCuratedOperatorKeys(operator curated.NodeOperator) error {
 	lidoContract, err := curated.NewCuratedModuleContract(i.iConfig.ElEndpoint)
-	// Check if there was an error
 	if err != nil {
 		return err
 	}
-	log.Debug("Created a new instance of LidoContract")
 
 	operatorName := curated.GetOperatorName(operator)
-	log.Infof("Getting new keys for operator %v", operatorName)
-	remainingKeys := operator.TotalSigningKeys - operatorValidatorCount
-	if remainingKeys == 0 {
-		log.Infof("No new keys for operator %v", operatorName)
-		return nil
-	}
-	savedKeys := int64(0)
-	var validatorPubkeys []string
+	totalKeys := operator.TotalSigningKeys
+	log.Infof("Reconciling keys for curated operator %v (on-chain total=%v)", operatorName, totalKeys)
 
-	offset := operatorValidatorCount
-	for {
+	validatorPubkeys := make([]string, 0, totalKeys)
+	offset := uint64(0)
+	for offset < totalKeys {
 		if i.stop {
-			break
+			return nil
 		}
-		limit := min(remainingKeys-offset, maxBatchSize)
-		validatorPubkeys = make([]string, limit)
+		limit := totalKeys - offset
+		if limit > maxBatchSize {
+			limit = maxBatchSize
+		}
 
 		operatorKeys, err := lidoContract.GetOperatorKeys(operator, offset, limit)
 		if err != nil {
 			return err
 		}
-		for i := uint64(0); i < limit; i++ {
-			key := operatorKeys.PubKeys[i*lido.PublicKeyLength : (i+1)*lido.PublicKeyLength]
-			validatorPubkeys[i] = hex.EncodeToString(key)
-		}
-
-		log.Debugf("Inserting %v keys for operator %v into the database", limit, operatorName)
-		count := i.dbClient.CopyLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolCurated)
-		log.Debugf("Inserted %v validators for operator %v. %v remaining", count, operatorName, remainingKeys)
-		savedKeys += count
-		done := limit < maxBatchSize
-		if done {
-			break
+		for k := uint64(0); k < limit; k++ {
+			key := operatorKeys.PubKeys[k*lido.PublicKeyLength : (k+1)*lido.PublicKeyLength]
+			validatorPubkeys = append(validatorPubkeys, hex.EncodeToString(key))
 		}
 		offset += limit
 	}
-	log.Infof("Got %v new keys for operator %v", savedKeys, operatorName)
 
+	upserted, removed, renamed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolCurated)
+	if err != nil {
+		return err
+	}
+	log.Infof("Curated operator %v reconciled: on-chain=%d upserted=%d removed=%d renamed=%d", operatorName, totalKeys, upserted, removed, renamed)
 	return nil
 }

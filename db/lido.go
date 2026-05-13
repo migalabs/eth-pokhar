@@ -31,6 +31,7 @@ const (
 	`
 	LidoProtocolCurated = "curated"
 	LidoProtocolCSM     = "csm"
+	LidoProtocolSDVT    = "sdvt"
 )
 
 // IdentifyLidoValidators identifies the lido validators and adds them to the identified validators table
@@ -75,6 +76,100 @@ func (p *PostgresDBService) ObtainLidoOperatorsValidatorCount(protocol string) (
 		operatorsValidatorCount = append(operatorsValidatorCount, count)
 	}
 	return operatorsValidatorCount, nil
+}
+
+// ReconcileLidoOperatorValidators makes t_lido reflect exactly the on-chain key
+// set for a given operator/protocol. It removes fossil keys (in DB but no longer
+// on-chain), inserts missing keys, and refreshes the operator name if it changed.
+// All work happens inside a single transaction so consumers never observe a
+// partially-rebuilt state for the operator.
+func (p *PostgresDBService) ReconcileLidoOperatorValidators(operator string, operatorIndex uint64, onChainKeys []string, protocol string) (int64, int64, int64, error) {
+	p.writerThreadsWG.Add(1)
+	defer p.writerThreadsWG.Done()
+	startTime := time.Now()
+
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return 0, 0, 0, errors.Wrap(err, "error acquiring database connection")
+	}
+	defer conn.Release()
+
+	tx, err := conn.Begin(p.ctx)
+	if err != nil {
+		return 0, 0, 0, errors.Wrap(err, "error beginning transaction")
+	}
+	defer tx.Rollback(p.ctx)
+
+	tempTableName := "tmp_lido_reconcile_" + strings.ReplaceAll(uuid.New().String(), "-", "_")
+	_, err = tx.Exec(p.ctx, `
+		CREATE TEMP TABLE `+tempTableName+` (
+			f_validator_pubkey text PRIMARY KEY
+		) ON COMMIT DROP;
+	`)
+	if err != nil {
+		return 0, 0, 0, errors.Wrap(err, "error creating temp table")
+	}
+
+	if len(onChainKeys) > 0 {
+		rows := make([][]interface{}, len(onChainKeys))
+		for i, k := range onChainKeys {
+			rows[i] = []interface{}{k}
+		}
+		_, err = tx.CopyFrom(p.ctx, pgx.Identifier{tempTableName}, []string{"f_validator_pubkey"}, pgx.CopyFromRows(rows))
+		if err != nil {
+			return 0, 0, 0, errors.Wrap(err, "error copying on-chain keys into temp table")
+		}
+	}
+
+	delCmd, err := tx.Exec(p.ctx, `
+		DELETE FROM t_lido
+		WHERE f_operator_index = $1
+		  AND f_protocol = $2
+		  AND f_validator_pubkey NOT IN (SELECT f_validator_pubkey FROM `+tempTableName+`);
+	`, operatorIndex, protocol)
+	if err != nil {
+		return 0, 0, 0, errors.Wrap(err, "error deleting fossil keys")
+	}
+	removed := delCmd.RowsAffected()
+
+	insCmd, err := tx.Exec(p.ctx, `
+		INSERT INTO t_lido (f_validator_pubkey, f_operator, f_operator_index, f_protocol)
+		SELECT t.f_validator_pubkey, $1, $2, $3
+		FROM `+tempTableName+` t
+		ON CONFLICT (f_validator_pubkey) DO UPDATE
+			SET f_operator = EXCLUDED.f_operator,
+			    f_operator_index = EXCLUDED.f_operator_index,
+			    f_protocol = EXCLUDED.f_protocol
+		WHERE t_lido.f_operator       IS DISTINCT FROM EXCLUDED.f_operator
+		   OR t_lido.f_operator_index IS DISTINCT FROM EXCLUDED.f_operator_index
+		   OR t_lido.f_protocol       IS DISTINCT FROM EXCLUDED.f_protocol;
+	`, operator, operatorIndex, protocol)
+	if err != nil {
+		return 0, 0, 0, errors.Wrap(err, "error inserting fresh keys")
+	}
+	upserted := insCmd.RowsAffected()
+
+	renameCmd, err := tx.Exec(p.ctx, `
+		UPDATE t_lido
+		SET f_operator = $1
+		WHERE f_operator_index = $2
+		  AND f_protocol = $3
+		  AND f_operator <> $1;
+	`, operator, operatorIndex, protocol)
+	if err != nil {
+		return 0, 0, 0, errors.Wrap(err, "error refreshing operator name")
+	}
+	renamed := renameCmd.RowsAffected()
+
+	if err := tx.Commit(p.ctx); err != nil {
+		return 0, 0, 0, errors.Wrap(err, "error committing reconcile transaction")
+	}
+
+	if upserted > 0 || removed > 0 || renamed > 0 {
+		wlog.Debugf("reconciled operator %v (proto=%v): upserted=%d removed=%d renamed=%d in %.2fs",
+			operator, protocol, upserted, removed, renamed, time.Since(startTime).Seconds())
+	}
+	return upserted, removed, renamed, nil
 }
 
 // CopyLidoOperatorValidators copies the validators to the database for a given operator
