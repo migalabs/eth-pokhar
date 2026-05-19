@@ -66,12 +66,13 @@ func (i *Identify) identifySDVT() error {
 		if i.stop {
 			break
 		}
-		wg.Add(1)
-		workerSemaphore <- struct{}{}
 		operator, err := sdvtContract.GetOperatorData(big.NewInt(operatorIndex))
 		if err != nil {
+			wg.Wait()
 			return err
 		}
+		wg.Add(1)
+		workerSemaphore <- struct{}{}
 
 		go func(operator curated.NodeOperator) {
 			defer wg.Done()
@@ -126,11 +127,11 @@ func (i *Identify) processSDVTOperatorKeys(operator curated.NodeOperator) error 
 		offset += limit
 	}
 
-	upserted, removed, renamed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolSDVT)
+	upserted, removed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolSDVT)
 	if err != nil {
 		return err
 	}
-	log.Infof("SDVT operator %v reconciled: on-chain=%d upserted=%d removed=%d renamed=%d", operatorName, totalKeys, upserted, removed, renamed)
+	log.Infof("SDVT operator %v reconciled: on-chain=%d upserted=%d removed=%d", operatorName, totalKeys, upserted, removed)
 	return nil
 }
 
@@ -159,12 +160,13 @@ func (i *Identify) identifyCSM() error {
 		if i.stop {
 			break
 		}
-		wg.Add(1)
-		workerSemaphore <- struct{}{}
 		operator, err := csmContract.GetOperatorData(big.NewInt(operatorIndex))
 		if err != nil {
+			wg.Wait()
 			return err
 		}
+		wg.Add(1)
+		workerSemaphore <- struct{}{}
 
 		go func(operator csm.NodeOperatorCustom) {
 			defer wg.Done()
@@ -212,11 +214,11 @@ func (i *Identify) processCSMOperatorKeys(operator csm.NodeOperatorCustom) error
 		}
 	}
 
-	upserted, removed, renamed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, keysString, db.LidoProtocolCSM)
+	upserted, removed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, keysString, db.LidoProtocolCSM)
 	if err != nil {
 		return err
 	}
-	log.Infof("CSM operator %v reconciled: on-chain=%d upserted=%d removed=%d renamed=%d", operatorName, totalKeys, upserted, removed, renamed)
+	log.Infof("CSM operator %v reconciled: on-chain=%d upserted=%d removed=%d", operatorName, totalKeys, upserted, removed)
 	return nil
 }
 
@@ -247,12 +249,13 @@ func (i *Identify) identifyCuratedModule() error {
 		if i.stop {
 			break
 		}
-		wg.Add(1)
-		workerSemaphore <- struct{}{}
 		operator, err := lidoContract.GetOperatorData(big.NewInt(operatorIndex))
 		if err != nil {
+			wg.Wait()
 			return err
 		}
+		wg.Add(1)
+		workerSemaphore <- struct{}{}
 
 		go func(operator curated.NodeOperator) {
 			defer wg.Done()
@@ -311,10 +314,10 @@ func (i *Identify) processCuratedOperatorKeys(operator curated.NodeOperator) err
 		offset += limit
 	}
 
-	upserted, removed, renamed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolCurated)
+	upserted, removed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolCurated)
 	if err != nil {
 		return err
 	}
-	log.Infof("Curated operator %v reconciled: on-chain=%d upserted=%d removed=%d renamed=%d", operatorName, totalKeys, upserted, removed, renamed)
+	log.Infof("Curated operator %v reconciled: on-chain=%d upserted=%d removed=%d", operatorName, totalKeys, upserted, removed)
 	return nil
 }

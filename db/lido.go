@@ -80,23 +80,24 @@ func (p *PostgresDBService) ObtainLidoOperatorsValidatorCount(protocol string) (
 
 // ReconcileLidoOperatorValidators makes t_lido reflect exactly the on-chain key
 // set for a given operator/protocol. It removes fossil keys (in DB but no longer
-// on-chain), inserts missing keys, and refreshes the operator name if it changed.
-// All work happens inside a single transaction so consumers never observe a
-// partially-rebuilt state for the operator.
-func (p *PostgresDBService) ReconcileLidoOperatorValidators(operator string, operatorIndex uint64, onChainKeys []string, protocol string) (int64, int64, int64, error) {
+// on-chain) and inserts missing keys; the UPSERT also refreshes f_operator,
+// f_operator_index and f_protocol for any row whose values diverged from
+// on-chain. All work happens inside a single transaction so consumers never
+// observe a partially-rebuilt state for the operator.
+func (p *PostgresDBService) ReconcileLidoOperatorValidators(operator string, operatorIndex uint64, onChainKeys []string, protocol string) (int64, int64, error) {
 	p.writerThreadsWG.Add(1)
 	defer p.writerThreadsWG.Done()
 	startTime := time.Now()
 
 	conn, err := p.psqlPool.Acquire(p.ctx)
 	if err != nil {
-		return 0, 0, 0, errors.Wrap(err, "error acquiring database connection")
+		return 0, 0, errors.Wrap(err, "error acquiring database connection")
 	}
 	defer conn.Release()
 
 	tx, err := conn.Begin(p.ctx)
 	if err != nil {
-		return 0, 0, 0, errors.Wrap(err, "error beginning transaction")
+		return 0, 0, errors.Wrap(err, "error beginning transaction")
 	}
 	defer tx.Rollback(p.ctx)
 
@@ -107,7 +108,7 @@ func (p *PostgresDBService) ReconcileLidoOperatorValidators(operator string, ope
 		) ON COMMIT DROP;
 	`)
 	if err != nil {
-		return 0, 0, 0, errors.Wrap(err, "error creating temp table")
+		return 0, 0, errors.Wrap(err, "error creating temp table")
 	}
 
 	if len(onChainKeys) > 0 {
@@ -117,7 +118,7 @@ func (p *PostgresDBService) ReconcileLidoOperatorValidators(operator string, ope
 		}
 		_, err = tx.CopyFrom(p.ctx, pgx.Identifier{tempTableName}, []string{"f_validator_pubkey"}, pgx.CopyFromRows(rows))
 		if err != nil {
-			return 0, 0, 0, errors.Wrap(err, "error copying on-chain keys into temp table")
+			return 0, 0, errors.Wrap(err, "error copying on-chain keys into temp table")
 		}
 	}
 
@@ -128,7 +129,7 @@ func (p *PostgresDBService) ReconcileLidoOperatorValidators(operator string, ope
 		  AND f_validator_pubkey NOT IN (SELECT f_validator_pubkey FROM `+tempTableName+`);
 	`, operatorIndex, protocol)
 	if err != nil {
-		return 0, 0, 0, errors.Wrap(err, "error deleting fossil keys")
+		return 0, 0, errors.Wrap(err, "error deleting fossil keys")
 	}
 	removed := delCmd.RowsAffected()
 
@@ -145,31 +146,19 @@ func (p *PostgresDBService) ReconcileLidoOperatorValidators(operator string, ope
 		   OR t_lido.f_protocol       IS DISTINCT FROM EXCLUDED.f_protocol;
 	`, operator, operatorIndex, protocol)
 	if err != nil {
-		return 0, 0, 0, errors.Wrap(err, "error inserting fresh keys")
+		return 0, 0, errors.Wrap(err, "error inserting fresh keys")
 	}
 	upserted := insCmd.RowsAffected()
 
-	renameCmd, err := tx.Exec(p.ctx, `
-		UPDATE t_lido
-		SET f_operator = $1
-		WHERE f_operator_index = $2
-		  AND f_protocol = $3
-		  AND f_operator <> $1;
-	`, operator, operatorIndex, protocol)
-	if err != nil {
-		return 0, 0, 0, errors.Wrap(err, "error refreshing operator name")
-	}
-	renamed := renameCmd.RowsAffected()
-
 	if err := tx.Commit(p.ctx); err != nil {
-		return 0, 0, 0, errors.Wrap(err, "error committing reconcile transaction")
+		return 0, 0, errors.Wrap(err, "error committing reconcile transaction")
 	}
 
-	if upserted > 0 || removed > 0 || renamed > 0 {
-		wlog.Debugf("reconciled operator %v (proto=%v): upserted=%d removed=%d renamed=%d in %.2fs",
-			operator, protocol, upserted, removed, renamed, time.Since(startTime).Seconds())
+	if upserted > 0 || removed > 0 {
+		wlog.Debugf("reconciled operator %v (proto=%v): upserted=%d removed=%d in %.2fs",
+			operator, protocol, upserted, removed, time.Since(startTime).Seconds())
 	}
-	return upserted, removed, renamed, nil
+	return upserted, removed, nil
 }
 
 // CopyLidoOperatorValidators copies the validators to the database for a given operator
