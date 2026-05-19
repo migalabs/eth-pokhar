@@ -29,6 +29,15 @@ func (i *Identify) IdentifyLidoValidators() error {
 	}
 	log.Debug("Identified lido csm validators")
 
+	// CM v2 must run AFTER the v1 Curated identification so that its
+	// externalOperators[] step can find the corresponding v1 rows already
+	// present in t_lido and tag them with the group id/name.
+	log.Debug("Identifying lido CM v2 module validators")
+	if err := i.IdentifyCMv2Validators(); err != nil {
+		return err
+	}
+	log.Debug("Identified lido CM v2 module validators")
+
 	return nil
 }
 
