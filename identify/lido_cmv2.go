@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	db "github.com/migalabs/eth-pokhar/db"
 	"github.com/migalabs/eth-pokhar/lido"
@@ -60,6 +61,7 @@ func (i *Identify) IdentifyCMv2Validators() error {
 
 	workerSemaphore := make(chan struct{}, 4)
 	var wg sync.WaitGroup
+	var attempted, failed atomic.Int64
 
 	for groupID := int64(0); groupID < groupsCount; groupID++ {
 		if i.stop {
@@ -73,7 +75,9 @@ func (i *Identify) IdentifyCMv2Validators() error {
 		go func(gid int64) {
 			defer wg.Done()
 			defer func() { <-workerSemaphore }()
+			attempted.Add(1)
 			if err := i.processCMv2Group(client, gid); err != nil {
+				failed.Add(1)
 				log.Errorf("CM v2 group %d failed: %v", gid, err)
 			}
 		}(groupID)
@@ -81,6 +85,12 @@ func (i *Identify) IdentifyCMv2Validators() error {
 	wg.Wait()
 	if i.stop {
 		return nil
+	}
+	// Per-group failures are tolerated (logged and skipped), but if every group
+	// we attempted failed there is almost certainly a systemic problem (bad RPC,
+	// ABI mismatch); surface it rather than reporting a misleading success.
+	if n := attempted.Load(); n > 0 && failed.Load() == n {
+		return fmt.Errorf("all %d CM v2 groups failed to process", n)
 	}
 
 	log.Debug("Propagating CM v2 group tags onto t_identified_validators via t_lido")
