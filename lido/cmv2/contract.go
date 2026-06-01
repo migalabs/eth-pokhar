@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/migalabs/eth-pokhar/lido"
+	log "github.com/sirupsen/logrus"
 )
 
 // Lido Curated Module v2 addresses.
@@ -47,11 +48,22 @@ func (c *Client) Close() {
 // fall back to the Hoodi testnet defaults — useful during early development
 // while the mainnet deployment is pending.
 func NewClient(endpoint, metaRegistryAddr, curatedModuleAddr string) (*Client, error) {
+	if endpoint == "" {
+		return nil, fmt.Errorf("empty EL endpoint")
+	}
 	if metaRegistryAddr == "" {
+		log.Warnf("CM v2: no MetaRegistry address supplied, falling back to Hoodi testnet default %s", MetaRegistryAddressHoodi)
 		metaRegistryAddr = MetaRegistryAddressHoodi
 	}
 	if curatedModuleAddr == "" {
+		log.Warnf("CM v2: no CuratedModule address supplied, falling back to Hoodi testnet default %s", CuratedModuleAddressHoodi)
 		curatedModuleAddr = CuratedModuleAddressHoodi
+	}
+	if !common.IsHexAddress(metaRegistryAddr) {
+		return nil, fmt.Errorf("invalid MetaRegistry address: %q", metaRegistryAddr)
+	}
+	if !common.IsHexAddress(curatedModuleAddr) {
+		return nil, fmt.Errorf("invalid CuratedModule address: %q", curatedModuleAddr)
 	}
 	ethClient, err := ethclient.Dial(endpoint)
 	if err != nil {
