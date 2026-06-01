@@ -88,9 +88,9 @@ func (p *PostgresDBService) CopyLidoCMv2OperatorValidators(
 	groupID int64,
 	groupName string,
 	pubkeys []string,
-) int64 {
+) (int64, error) {
 	if len(pubkeys) == 0 {
-		return 0
+		return 0, nil
 	}
 	p.writerThreadsWG.Add(1)
 	defer p.writerThreadsWG.Done()
@@ -105,7 +105,7 @@ func (p *PostgresDBService) CopyLidoCMv2OperatorValidators(
 
 	conn, err := p.psqlPool.Acquire(p.ctx)
 	if err != nil {
-		wlog.Fatalf("error acquiring database connection: %v", err)
+		return 0, errors.Wrap(err, "error acquiring database connection")
 	}
 	defer conn.Release()
 
@@ -120,7 +120,7 @@ func (p *PostgresDBService) CopyLidoCMv2OperatorValidators(
 		);
 	`)
 	if err != nil {
-		wlog.Fatalf("error creating temporary table: %v", err)
+		return 0, errors.Wrap(err, "error creating temporary table")
 	}
 
 	_, err = conn.CopyFrom(
@@ -130,7 +130,7 @@ func (p *PostgresDBService) CopyLidoCMv2OperatorValidators(
 		pgx.CopyFromRows(rows),
 	)
 	if err != nil {
-		wlog.Fatalf("error copying data to temporary table: %v", err)
+		return 0, errors.Wrap(err, "error copying data to temporary table")
 	}
 
 	count, err := conn.Exec(p.ctx, `
@@ -140,18 +140,18 @@ func (p *PostgresDBService) CopyLidoCMv2OperatorValidators(
 		ON CONFLICT (f_validator_pubkey) DO NOTHING;
 	`)
 	if err != nil {
-		wlog.Fatalf("error inserting data from temporary table to main table: %v", err)
+		return 0, errors.Wrap(err, "error inserting data from temporary table to main table")
 	}
 
 	if _, dropErr := conn.Exec(p.ctx, `DROP TABLE `+tempTableName+`;`); dropErr != nil {
-		wlog.Fatalf("error dropping temporary table: %v", dropErr)
+		return 0, errors.Wrap(dropErr, "error dropping temporary table")
 	}
 
 	if count.RowsAffected() > 0 {
 		wlog.Debugf("persisted %d CM v2 keys for operator %s in %.2fs",
 			count.RowsAffected(), operator, time.Since(startTime).Seconds())
 	}
-	return count.RowsAffected()
+	return count.RowsAffected(), nil
 }
 
 // TagCuratedV1OperatorsWithGroup propagates a CM v2 group label onto existing

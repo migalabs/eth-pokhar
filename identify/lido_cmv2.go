@@ -182,7 +182,10 @@ func (i *Identify) processCMv2SubOperator(client *cmv2.Client, groupID int64, gr
 		offset += batch
 	}
 
-	inserted := i.dbClient.CopyLidoCMv2OperatorValidators(operatorTag, nodeOperatorID, groupID, groupName, keys)
+	inserted, err := i.dbClient.CopyLidoCMv2OperatorValidators(operatorTag, nodeOperatorID, groupID, groupName, keys)
+	if err != nil {
+		return fmt.Errorf("persisting CM v2 keys (op=%d, group=%d): %w", nodeOperatorID, groupID, err)
+	}
 	log.Infof("CM v2 group %d operator %d: persisted %d keys (tag=%s)", groupID, nodeOperatorID, inserted, operatorTag)
 	return nil
 }
