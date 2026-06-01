@@ -184,6 +184,10 @@ func (p *PostgresDBService) TagCuratedV1OperatorsWithGroup(
 	}
 	defer conn.Release()
 
+	// Lido operator indices are small, monotonically-increasing counters
+	// assigned by the NodeOperatorsRegistry (orders of magnitude below both
+	// math.MaxInt64 and the int4 column width), so this uint64->int64
+	// narrowing cannot overflow in practice.
 	indices := make([]int64, len(v1OperatorIndices))
 	for i, v := range v1OperatorIndices {
 		indices[i] = int64(v)
