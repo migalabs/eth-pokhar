@@ -92,6 +92,15 @@ func (p *PostgresDBService) CopyLidoCMv2OperatorValidators(
 	if len(pubkeys) == 0 {
 		return 0, nil
 	}
+	if operator == "" {
+		return 0, errors.New("empty operator name")
+	}
+	if groupName == "" {
+		return 0, errors.New("empty group name")
+	}
+	if groupID < 0 {
+		return 0, errors.Errorf("invalid group id %d", groupID)
+	}
 	p.writerThreadsWG.Add(1)
 	defer p.writerThreadsWG.Done()
 	startTime := time.Now()
