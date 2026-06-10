@@ -1,4 +1,5 @@
 <!-- PR title must follow Conventional Commits with a scope, e.g. `fix(lido/cmv2): validate endpoint addresses` -->
+<!-- Target branch must be `dev`. `main` (production) only accepts release PRs from `dev` or `hotfix/*` branches. -->
 
 ## Description
 
