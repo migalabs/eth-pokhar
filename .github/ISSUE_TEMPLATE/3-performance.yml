@@ -1,0 +1,69 @@
+name: Performance Issue
+description: Report slowness, excessive resource usage or API quota problems
+title: "[perf]: "
+labels: ["performance", "needs-triage"]
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: What is slow or consuming too many resources (time, memory, DB size, RPC/Alchemy requests)?
+      placeholder: "The Lido curated module routine takes ~6h on a synced database, most of it in per-key contract calls..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: metrics
+    attributes:
+      label: Measurements / baseline
+      description: Numbers that show the problem — durations, request counts, DB sizes. The README benchmark tables are a good reference point.
+      placeholder: |
+        - identify (full run): 5h 58m
+        - Alchemy requests: ~1.2M
+        - Database size after sync: 3.4 GB
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Impact
+      description: |
+        Critical = makes the tool unusable or exhausts quotas. High = major slowdown on every run.
+        Medium = noticeable but tolerable. Low = minor optimization opportunity.
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which module/component is affected? Pick the closest match.
+      options:
+        - identify
+        - lido
+        - rocketpool
+        - coinbase
+        - beacon-deposits
+        - db
+        - alchemy
+        - config
+        - docker/ci
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      value: |
+        - eth-pokhar version/commit:
+        - EL endpoint type (local node / Infura / Alchemy / ...):
+        - Hardware (CPU / RAM / disk):

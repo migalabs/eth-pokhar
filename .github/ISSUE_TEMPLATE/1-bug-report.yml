@@ -1,0 +1,101 @@
+name: Bug Report
+description: Report something that is broken or not behaving as expected
+title: "[bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: "`identify` exits with a panic while processing Lido CSM operators..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps to reproduce the behavior, including the command and relevant flags.
+      placeholder: |
+        1. Sync the database with `eth-pokhar beacon_depositors_transactions ...`
+        2. Run `eth-pokhar identify --log-level=debug ...`
+        3. Wait for the Lido identification step
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: |
+        Critical = crash, data corruption or wrong tagging results. High = major feature broken, no workaround.
+        Medium = feature impaired, workaround exists. Low = minor or cosmetic.
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which module/component is affected? Pick the closest match.
+      options:
+        - identify
+        - lido
+        - rocketpool
+        - coinbase
+        - beacon-deposits
+        - db
+        - alchemy
+        - config
+        - docker/ci
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: command
+    attributes:
+      label: Command affected
+      options:
+        - identify
+        - beacon_depositors_transactions
+        - both / not command-specific
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Fill in what applies.
+      value: |
+        - eth-pokhar version/commit:
+        - Go version:
+        - Network: mainnet
+        - EL endpoint type (local node / Infura / Alchemy / ...):
+        - PostgreSQL (version, docker-compose or external):
+        - OS:
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste relevant log output. Redact API keys and private endpoints. This is automatically formatted, no need for backticks.
+      render: shell
