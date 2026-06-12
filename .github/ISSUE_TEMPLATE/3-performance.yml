@@ -27,7 +27,7 @@ body:
   - type: dropdown
     id: severity
     attributes:
-      label: Impact
+      label: Severity
       description: |
         Critical = makes the tool unusable or exhausts quotas. High = major slowdown on every run.
         Medium = noticeable but tolerable. Low = minor optimization opportunity.
