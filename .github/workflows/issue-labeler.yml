@@ -1,0 +1,43 @@
+name: Issue Labeler
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve source template from the form marker label
+        id: template
+        env:
+          TEMPLATE: >-
+            ${{ (contains(github.event.issue.labels.*.name, 'bug') && '1-bug-report.yml')
+             || (contains(github.event.issue.labels.*.name, 'enhancement') && '2-feature-request.yml')
+             || (contains(github.event.issue.labels.*.name, 'performance') && '3-performance.yml')
+             || (contains(github.event.issue.labels.*.name, 'chore') && '5-task.yml')
+             || '' }}
+        run: echo "file=$TEMPLATE" >> "$GITHUB_OUTPUT"
+
+      - name: Parse issue form
+        id: issue-parser
+        if: steps.template.outputs.file != ''
+        uses: stefanbuck/github-issue-parser@v3
+        with:
+          template-path: .github/ISSUE_TEMPLATE/${{ steps.template.outputs.file }}
+
+      - name: Apply labels from form dropdowns
+        if: steps.template.outputs.file != ''
+        uses: redhat-plumbers-in-action/advanced-issue-labeler@v3
+        with:
+          issue-form: ${{ steps.issue-parser.outputs.jsonString }}
+          template: ${{ steps.template.outputs.file }}
+          token: ${{ secrets.GITHUB_TOKEN }}

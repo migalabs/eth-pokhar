@@ -1,0 +1,72 @@
+policy:
+  - template: ['1-bug-report.yml', '3-performance.yml']
+    section:
+      - id: ['severity']
+        block-list: []
+        label:
+          - name: 'severity:critical'
+            keys: ['Critical']
+          - name: 'severity:high'
+            keys: ['High']
+          - name: 'severity:medium'
+            keys: ['Medium']
+          - name: 'severity:low'
+            keys: ['Low']
+      - id: ['area']
+        block-list: ['other']
+        label:
+          - name: 'area:identify'
+            keys: ['identify']
+          - name: 'area:lido'
+            keys: ['lido']
+          - name: 'area:rocketpool'
+            keys: ['rocketpool']
+          - name: 'area:coinbase'
+            keys: ['coinbase']
+          - name: 'area:beacon-deposits'
+            keys: ['beacon-deposits']
+          - name: 'area:db'
+            keys: ['db']
+          - name: 'area:alchemy'
+            keys: ['alchemy']
+          - name: 'area:config'
+            keys: ['config']
+          - name: 'area:ci'
+            keys: ['docker/ci']
+          - name: 'area:docs'
+            keys: ['docs']
+
+  - template: ['2-feature-request.yml', '5-task.yml']
+    section:
+      - id: ['priority']
+        block-list: []
+        label:
+          - name: 'priority:high'
+            keys: ['High']
+          - name: 'priority:medium'
+            keys: ['Medium']
+          - name: 'priority:low'
+            keys: ['Low']
+      - id: ['area']
+        block-list: ['other']
+        label:
+          - name: 'area:identify'
+            keys: ['identify']
+          - name: 'area:lido'
+            keys: ['lido']
+          - name: 'area:rocketpool'
+            keys: ['rocketpool']
+          - name: 'area:coinbase'
+            keys: ['coinbase']
+          - name: 'area:beacon-deposits'
+            keys: ['beacon-deposits']
+          - name: 'area:db'
+            keys: ['db']
+          - name: 'area:alchemy'
+            keys: ['alchemy']
+          - name: 'area:config'
+            keys: ['config']
+          - name: 'area:ci'
+            keys: ['docker/ci']
+          - name: 'area:docs'
+            keys: ['docs']

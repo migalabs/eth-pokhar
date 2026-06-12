@@ -1,0 +1,27 @@
+name: Documentation
+description: Report missing, wrong or unclear documentation
+title: "[docs]: "
+labels: ["documentation"]
+body:
+  - type: textarea
+    id: location
+    attributes:
+      label: Location
+      description: Where is the documentation problem? File, section or link.
+      placeholder: "README.md — 'Run the tool' section"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing?
+      description: Describe the gap, error or ambiguity.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested fix
+      description: If you have an idea of what it should say instead, write it here.
