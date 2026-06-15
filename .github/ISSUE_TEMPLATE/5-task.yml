@@ -1,0 +1,57 @@
+name: Task / Chore
+description: Refactors, tech debt, dependency updates, tooling and other maintenance work
+title: "[task]: "
+labels: ["chore", "needs-triage"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What needs to be done and why.
+      placeholder: "Bump go-ethereum to the latest release and adapt to the new bind API..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: task-type
+    attributes:
+      label: Task type
+      options:
+        - Refactor / tech debt
+        - Dependency update
+        - Tooling / CI
+        - Testing
+        - Other maintenance
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which module/component does this touch? Pick the closest match.
+      options:
+        - identify
+        - lido
+        - rocketpool
+        - coinbase
+        - beacon-deposits
+        - db
+        - alchemy
+        - config
+        - docker/ci
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true

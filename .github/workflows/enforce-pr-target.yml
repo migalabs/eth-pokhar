@@ -1,0 +1,19 @@
+name: Enforce PR target
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only dev and hotfix branches may target main
+        if: github.head_ref != 'dev' && !startsWith(github.head_ref, 'hotfix/')
+        run: |
+          echo "::error::main only accepts PRs from 'dev' or 'hotfix/*'. Retarget this PR to 'dev' (gh pr edit ${{ github.event.pull_request.number }} --base dev)."
+          exit 1
