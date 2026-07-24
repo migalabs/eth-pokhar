@@ -24,8 +24,9 @@ const (
 		INNER JOIN t_depositors_insert t2 
 			ON t1.f_depositor = t2.f_depositor
 		WHERE t1.rn = 1
-		ON CONFLICT (f_validator_pubkey) DO UPDATE SET 
-			f_pool_name = EXCLUDED.f_pool_name;
+		ON CONFLICT (f_validator_pubkey) DO UPDATE SET
+			f_pool_name = EXCLUDED.f_pool_name
+		WHERE t_identified_validators.f_pool_name IS DISTINCT FROM EXCLUDED.f_pool_name;
 	`
 )
 

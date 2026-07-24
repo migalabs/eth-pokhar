@@ -57,7 +57,14 @@ const (
 				F_VALIDATOR_PUBKEY != ''
 		) AS subquery2
 		WHERE 
-			t_identified_validators.f_validator_pubkey = subquery2.f_validator_pubkey;
+			t_identified_validators.f_validator_pubkey = subquery2.f_validator_pubkey
+			AND t_identified_validators.f_pool_name IS DISTINCT FROM subquery2.whale_id
+			AND (
+				t_identified_validators.f_pool_name IS NULL
+				OR t_identified_validators.f_pool_name = ''
+				OR t_identified_validators.f_pool_name = 'solo_stakers'
+				OR t_identified_validators.f_pool_name LIKE 'whale\_%'
+			);
 		`
 
 	depositorsColumnName        = "f_depositor"

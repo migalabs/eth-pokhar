@@ -1,0 +1,3 @@
+DROP INDEX IF EXISTS idx_t_beacon_deposits_f_withdrawal_address;
+DROP INDEX IF EXISTS idx_t_beacon_deposits_f_depositor;
+DROP INDEX IF EXISTS idx_t_beacon_deposits_f_validator_pubkey;

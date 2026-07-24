@@ -24,10 +24,11 @@ const (
 	`
 
 	identifyLidoValidators = `
-	UPDATE t_identified_validators 
+	UPDATE t_identified_validators
 	SET f_pool_name = t_lido.f_operator
 	FROM t_lido
-	WHERE t_identified_validators.f_validator_pubkey = t_lido.f_validator_pubkey;
+	WHERE t_identified_validators.f_validator_pubkey = t_lido.f_validator_pubkey
+		AND t_identified_validators.f_pool_name IS DISTINCT FROM t_lido.f_operator;
 	`
 	LidoProtocolCurated = "curated"
 	LidoProtocolCSM     = "csm"

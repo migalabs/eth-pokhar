@@ -15,10 +15,11 @@ const (
 	FROM t_rocketpool;
 	`
 	identifyRocketpoolValidators = `
-	UPDATE t_identified_validators 
+	UPDATE t_identified_validators
 	SET f_pool_name = 'rocketpool'
 	FROM t_rocketpool
-	WHERE t_identified_validators.f_validator_pubkey = t_rocketpool.f_validator_pubkey;
+	WHERE t_identified_validators.f_validator_pubkey = t_rocketpool.f_validator_pubkey
+		AND t_identified_validators.f_pool_name IS DISTINCT FROM 'rocketpool';
 	`
 )
 
