@@ -54,6 +54,7 @@ const (
 				'd2276af80582cac230edc4c42e9a9c096f3c09aa')
 		)
 	)
+	AND f_pool_name IS DISTINCT FROM 'coinbase'
 	`
 )
 

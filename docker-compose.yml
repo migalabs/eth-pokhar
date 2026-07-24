@@ -14,6 +14,7 @@ services:
       - ALCHEMY_URL=${ALCHEMY_URL}
       - WHALE_THRESHOLD=${WHALE_THRESHOLD}
       - ONLY_DEPOSITS=${ONLY_DEPOSITS:-false}
+      - RECREATE_TABLE=${RECREATE_TABLE:-false}
     network_mode: "host"
     depends_on:
       db:
