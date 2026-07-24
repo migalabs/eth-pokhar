@@ -157,6 +157,31 @@ fi
 echo "$LOG_PREFIX Gates passed. Applying snapshot atomically..."
 ch "EXCHANGE TABLES t_eth2_pubkeys AND t_eth2_pubkeys_staging" || exit 1
 
+# ------------------------------------------------- optional t_pubkey_pool mirror
+# Some deployments also serve a pubkey -> pool mirror without requiring a
+# val_idx assignment (labels for deposits still in the pending queue). Same
+# staging + EXCHANGE pattern; the source snapshot already passed the gates.
+if [ "${SYNC_PUBKEY_POOL:-false}" = "true" ]; then
+    echo "$LOG_PREFIX Syncing t_pubkey_pool mirror..."
+    ch "CREATE TABLE IF NOT EXISTS t_pubkey_pool_staging AS t_pubkey_pool" || exit 1
+    ch "TRUNCATE TABLE t_pubkey_pool_staging" || exit 1
+    ch "
+        INSERT INTO t_pubkey_pool_staging (f_public_key, f_pool_name)
+        SELECT
+            concat('0x', iv.f_validator_pubkey) AS f_public_key,
+            iv.f_pool_name
+        FROM postgresql('${PG_HOST}:${PG_PORT}', '${PG_DB}', 't_identified_validators', '${PG_USER}', '${PG_PASS}') AS iv
+    " || { echo "$LOG_PREFIX ERROR: t_pubkey_pool import failed, live mirror untouched"; exit 1; }
+    PP_COUNT=$(ch "SELECT count() FROM t_pubkey_pool_staging") || exit 1
+    if [ "$PP_COUNT" -eq 0 ]; then
+        echo "$LOG_PREFIX GATE FAILED: t_pubkey_pool snapshot is empty, live mirror untouched"
+        exit 1
+    fi
+    ch "EXCHANGE TABLES t_pubkey_pool AND t_pubkey_pool_staging" || exit 1
+    echo "$LOG_PREFIX t_pubkey_pool updated: $PP_COUNT entries"
+fi
+
+# ------------------------------------------------- version stamp
 VERSION=$(date +%s)
 ch "CREATE TABLE IF NOT EXISTS t_eth2_pubkeys_version (
         f_version UInt64,
