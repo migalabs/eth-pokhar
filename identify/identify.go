@@ -105,18 +105,12 @@ func (i *Identify) Run() {
 		}
 	}
 
-	if !i.stop {
-		startTime := time.Now()
-		log.Info("Applying withdrawal address insert")
-		err := i.dbClient.ApplyWithdrawalAddressInsert()
-		if err != nil {
-			log.Errorf("Error applying withdrawal address insert: %v. Skipping to next step.", err)
-		} else {
-			endTime := time.Now()
-			log.Infof("Applied withdrawal address insert in %v", endTime.Sub(startTime))
-		}
-	}
-
+	// Depositor tags (typically the node operator) are applied BEFORE
+	// withdrawal-address tags (the owner of the stake) on purpose: both
+	// upserts resolve conflicts positionally (last write wins), and a
+	// withdrawal credential is a stronger ownership signal than who sent
+	// the deposit transaction, since batch-deposit contracts are shared
+	// infrastructure. See issue #28.
 	if !i.stop {
 		startTime := time.Now()
 		log.Info("Applying depositors insert")
@@ -126,6 +120,18 @@ func (i *Identify) Run() {
 		} else {
 			endTime := time.Now()
 			log.Infof("Applied depositors insert in %v", endTime.Sub(startTime))
+		}
+	}
+
+	if !i.stop {
+		startTime := time.Now()
+		log.Info("Applying withdrawal address insert")
+		err := i.dbClient.ApplyWithdrawalAddressInsert()
+		if err != nil {
+			log.Errorf("Error applying withdrawal address insert: %v. Skipping to next step.", err)
+		} else {
+			endTime := time.Now()
+			log.Infof("Applied withdrawal address insert in %v", endTime.Sub(startTime))
 		}
 	}
 
