@@ -23,23 +23,54 @@ var (
 		select f_depositor, MAX(f_block_num) f_max_block_num
 		from t_beacon_depositors_transactions
 		group by f_depositor)
-	
+
 	SELECT d.f_depositor, COALESCE(MAX(t.f_max_block_num), 0) f_max_block_num
 		FROM t_beacon_deposits d
 		LEFT JOIN max_block_per_depositor t ON d.f_depositor = t.f_depositor
 		GROUP BY d.f_depositor
 		ORDER BY f_max_block_num ASC;
 	`
+
+	// Same as above, but only depositors with at least one validator whose
+	// tag is weak: missing, empty, whale_* or solo_stakers. Transactions are
+	// only used to identify coinbase validators, and coinbase candidates are
+	// precisely the validators that would otherwise sit in those catch-all
+	// buckets, so depositors whose validators all carry a strong tag do not
+	// need their transfer history refreshed. Every validator gets a row in
+	// t_identified_validators on each identify run, so row existence alone
+	// cannot be used as the filter (see issue #17).
+	selectCheckpointPerUntaggedDepositor = `
+	WITH max_block_per_depositor AS (
+		select f_depositor, MAX(f_block_num) f_max_block_num
+		from t_beacon_depositors_transactions
+		group by f_depositor)
+
+	SELECT d.f_depositor, COALESCE(MAX(t.f_max_block_num), 0) f_max_block_num
+		FROM t_beacon_deposits d
+		LEFT JOIN max_block_per_depositor t ON d.f_depositor = t.f_depositor
+		LEFT JOIN t_identified_validators iv ON iv.f_validator_pubkey = d.f_validator_pubkey
+		GROUP BY d.f_depositor
+		HAVING COUNT(*) FILTER (WHERE iv.f_validator_pubkey IS NULL
+			OR iv.f_pool_name IS NULL
+			OR iv.f_pool_name = ''
+			OR iv.f_pool_name LIKE 'whale\_%'
+			OR iv.f_pool_name = 'solo_stakers') > 0
+		ORDER BY f_max_block_num ASC;
+	`
 )
 
-func (p *PostgresDBService) ObtainCheckpointPerDepositor() ([]models.DepositorCheckpoint, error) {
+func (p *PostgresDBService) ObtainCheckpointPerDepositor(skipTagged bool) ([]models.DepositorCheckpoint, error) {
 	conn, err := p.psqlPool.Acquire(p.ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "error acquiring database connection")
 	}
 	defer conn.Release()
 
-	rows, err := conn.Query(p.ctx, selectCheckpointPerDepositor)
+	query := selectCheckpointPerDepositor
+	if skipTagged {
+		query = selectCheckpointPerUntaggedDepositor
+	}
+	rows, err := conn.Query(p.ctx, query)
 	if err != nil {
 		rows.Close()
 		return nil, err

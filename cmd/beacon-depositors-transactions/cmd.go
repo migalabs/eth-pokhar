@@ -53,6 +53,11 @@ var BeaconDepositorsTransactionsCommand = &cli.Command{
 			Name:  "only-deposits",
 			Usage: "Only fetch deposits. If not set, it will fetch all new depositor transactions which can take up to 20 hours",
 		},
+		&cli.BoolFlag{
+			Name:    "skip-tagged",
+			Usage:   "Skip fetching transactions for depositors whose validators are all already identified. Transactions are only used to identify coinbase validators, so this saves most Alchemy credits/node calls and runtime; a new deposit brings its depositor back into scope automatically",
+			EnvVars: []string{"SKIP_TAGGED"},
+		},
 	},
 }
 

@@ -11,6 +11,7 @@ type BeaconDepositorsTransactionsConfig struct {
 	Workers      int    `json:"workers-num"`
 	AlchemyURL   string `json:"alchemy-url"`
 	OnlyDeposits bool   `json:"only-deposits"`
+	SkipTagged   bool   `json:"skip-tagged"`
 }
 
 func NewBeaconDepositorsTransactionsConfig() *BeaconDepositorsTransactionsConfig {
@@ -46,6 +47,10 @@ func (c *BeaconDepositorsTransactionsConfig) Apply(ctx *cli.Context) {
 
 	if ctx.IsSet("only-deposits") {
 		c.OnlyDeposits = true
+	}
+
+	if ctx.IsSet("skip-tagged") {
+		c.SkipTagged = true
 	}
 
 }
