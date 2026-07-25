@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	db "github.com/migalabs/eth-pokhar/db"
 	"github.com/migalabs/eth-pokhar/lido"
@@ -76,6 +77,16 @@ func (i *Identify) IdentifyLidoValidators() error {
 	}
 	log.Debug("Identified lido csm validators")
 
+	// One single pass over t_lido after the three modules updated it: the
+	// UPDATE joins half a million keys against t_identified_validators, so
+	// running it per module tripled the cost for the same final state.
+	startTime := time.Now()
+	err = i.dbClient.IdentifyLidoValidators()
+	if err != nil {
+		return err
+	}
+	log.Infof("Applied lido pool names in %v", time.Since(startTime))
+
 	return nil
 }
 
@@ -125,10 +136,6 @@ func (i *Identify) identifySDVT(keyCounts map[string]uint64) error {
 	log.Infof("SDVT module: operators=%d skipped=%d incremental=%d full=%d",
 		operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
 
-	err = i.dbClient.IdentifyLidoValidators()
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -237,13 +244,6 @@ func (i *Identify) identifyCSM(keyCounts map[string]uint64) error {
 	log.Infof("CSM module: operators=%d skipped=%d incremental=%d full=%d",
 		operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
 
-	log.Debug("Identifying lido curated validators")
-	err = i.dbClient.IdentifyLidoValidators()
-	if err != nil {
-		return err
-	}
-	log.Debug("Identified lido validators")
-
 	return nil
 }
 
@@ -343,13 +343,6 @@ func (i *Identify) identifyCuratedModule(keyCounts map[string]uint64) error {
 	}
 	log.Infof("Curated module: operators=%d skipped=%d incremental=%d full=%d",
 		operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
-
-	log.Debug("Identifying lido curated validators")
-	err = i.dbClient.IdentifyLidoValidators()
-	if err != nil {
-		return err
-	}
-	log.Debug("Identified lido validators")
 
 	return nil
 }
