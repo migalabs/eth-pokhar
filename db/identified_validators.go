@@ -9,9 +9,12 @@ import (
 const (
 	addNewValidatorsQuery = `
 		INSERT INTO t_identified_validators (f_validator_pubkey, f_pool_name)
-		SELECT f_validator_pubkey, 'solo_stakers'::text
-		FROM t_validator_last_deposit
-		WHERE f_validator_pubkey != ''
+		SELECT v.f_validator_pubkey, 'solo_stakers'::text
+		FROM t_validator_last_deposit v
+		LEFT JOIN t_identified_validators t
+			ON t.f_validator_pubkey = v.f_validator_pubkey
+		WHERE t.f_validator_pubkey IS NULL
+			AND v.f_validator_pubkey != ''
 		ON CONFLICT (f_validator_pubkey) DO NOTHING;
 	`
 	truncateIdentifiedValidatorsQuery = `
