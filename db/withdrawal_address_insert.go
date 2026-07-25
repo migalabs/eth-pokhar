@@ -14,7 +14,11 @@ const (
 		FROM t_validator_last_deposit v
 		INNER JOIN t_withdrawal_address_insert m
 			ON v.f_withdrawal_address = m.f_withdrawal_address
+		LEFT JOIN t_identified_validators t
+			ON t.f_validator_pubkey = v.f_validator_pubkey
 		WHERE v.f_withdrawal_address != ''
+			AND (t.f_validator_pubkey IS NULL
+				OR t.f_pool_name IS DISTINCT FROM m.f_pool_name)
 		ON CONFLICT (f_validator_pubkey) DO UPDATE SET
 			f_pool_name = EXCLUDED.f_pool_name
 		WHERE t_identified_validators.f_pool_name IS DISTINCT FROM EXCLUDED.f_pool_name;
