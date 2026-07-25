@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"math/big"
 	"sync"
+	"sync/atomic"
 
 	db "github.com/migalabs/eth-pokhar/db"
 	"github.com/migalabs/eth-pokhar/lido"
@@ -15,23 +16,61 @@ import (
 
 const maxBatchSize = 500
 
+// lidoModuleStats aggregates per-operator outcomes of a module pass.
+type lidoModuleStats struct {
+	skipped     atomic.Int64
+	incremental atomic.Int64
+	full        atomic.Int64
+}
+
+// lidoOperatorAction decides how to treat an operator by comparing the number
+// of keys already stored in t_lido against the on-chain total (which comes for
+// free with the operator data). Key registries are append-mostly, so most
+// operators need no work at all; fewer on-chain keys than stored means keys
+// were removed (the curated module compacts indexes on removal), which forces
+// a full refetch so the reconcile can drop fossils. Full runs (recreate-table)
+// force the full path for every operator: that weekly pass also absorbs
+// operator renames and any drift the incremental path cannot see.
+func (i *Identify) lidoOperatorAction(protocol string, operatorIndex uint64, onChainTotal uint64, keyCounts map[string]uint64, stats *lidoModuleStats) (string, uint64) {
+	if !i.iConfig.RecreateTable {
+		dbCount := keyCounts[db.LidoOperatorCountKey(protocol, operatorIndex)]
+		if dbCount == onChainTotal {
+			stats.skipped.Add(1)
+			return "skip", 0
+		}
+		if dbCount < onChainTotal {
+			stats.incremental.Add(1)
+			return "incremental", dbCount
+		}
+	}
+	stats.full.Add(1)
+	return "full", 0
+}
+
 func (i *Identify) IdentifyLidoValidators() error {
+	// One snapshot of stored key counts shared by the three modules. Operators
+	// are visited once per run, so intra-run staleness is not a concern.
+	keyCounts, err := i.dbClient.ObtainLidoOperatorKeyCounts()
+	if err != nil {
+		return err
+	}
+
 	log.Debug("Identifying lido curated module validators")
-	err := i.identifyCuratedModule()
+	err = i.identifyCuratedModule(keyCounts)
 	if err != nil {
 		return err
 	}
 	log.Debug("Identified lido curated module validators")
 
 	log.Debug("Identifying lido SDVT module validators")
-	err = i.identifySDVT()
+	err = i.identifySDVT(keyCounts)
 	if err != nil {
 		return err
 	}
 	log.Debug("Identified lido SDVT module validators")
 
 	log.Debug("Identifying lido csm validators")
-	err = i.identifyCSM()
+	err = i.identifyCSM(keyCounts)
 	if err != nil {
 		return err
 	}
@@ -43,10 +82,10 @@ func (i *Identify) IdentifyLidoValidators() error {
 ///// Simple DVT /////
 
 // identifySDVT identifies the validators for the Simple DVT module. Same key
-// registry semantics as the Curated module — only the contract address and
+// registry semantics as the Curated module: only the contract address and
 // operator name resolution differ. Operator names come from the on-chain
 // contract (no pre-defined override list).
-func (i *Identify) identifySDVT() error {
+func (i *Identify) identifySDVT(keyCounts map[string]uint64) error {
 	log.Debug("Creating a new instance of SDVT contract")
 	sdvtContract, err := sdvt.NewSDVTContract(i.iConfig.ElEndpoint)
 	if err != nil {
@@ -59,6 +98,7 @@ func (i *Identify) identifySDVT() error {
 	}
 	log.Debugf("Found %v SDVT operators", operatorsCount)
 
+	stats := &lidoModuleStats{}
 	workerSemaphore := make(chan struct{}, 10)
 	var wg sync.WaitGroup
 
@@ -66,27 +106,24 @@ func (i *Identify) identifySDVT() error {
 		if i.stop {
 			break
 		}
-		operator, err := sdvtContract.GetOperatorData(big.NewInt(operatorIndex))
-		if err != nil {
-			wg.Wait()
-			return err
-		}
 		wg.Add(1)
 		workerSemaphore <- struct{}{}
 
-		go func(operator curated.NodeOperator) {
+		go func(operatorIndex int64) {
 			defer wg.Done()
-			if err := i.processSDVTOperatorKeys(operator); err != nil {
-				log.Errorf("Error reconciling SDVT operator %v: %v", operator.Index, err)
+			if err := i.processSDVTOperatorKeys(operatorIndex, keyCounts, stats); err != nil {
+				log.Errorf("Error reconciling SDVT operator %v: %v", operatorIndex, err)
 			}
 			<-workerSemaphore
-		}(operator)
+		}(operatorIndex)
 	}
 
 	wg.Wait()
 	if i.stop {
 		return nil
 	}
+	log.Infof("SDVT module: operators=%d skipped=%d incremental=%d full=%d",
+		operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
 
 	err = i.dbClient.IdentifyLidoValidators()
 	if err != nil {
@@ -95,18 +132,28 @@ func (i *Identify) identifySDVT() error {
 	return nil
 }
 
-func (i *Identify) processSDVTOperatorKeys(operator curated.NodeOperator) error {
+func (i *Identify) processSDVTOperatorKeys(operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
 	sdvtContract, err := sdvt.NewSDVTContract(i.iConfig.ElEndpoint)
+	if err != nil {
+		return err
+	}
+
+	operator, err := sdvtContract.GetOperatorData(big.NewInt(operatorIndex))
 	if err != nil {
 		return err
 	}
 
 	operatorName := sdvt.GetOperatorName(operator)
 	totalKeys := operator.TotalSigningKeys
-	log.Infof("Reconciling keys for SDVT operator %v (on-chain total=%v)", operatorName, totalKeys)
 
-	validatorPubkeys := make([]string, 0, totalKeys)
-	offset := uint64(0)
+	action, offset := i.lidoOperatorAction(db.LidoProtocolSDVT, operator.Index, totalKeys, keyCounts, stats)
+	if action == "skip" {
+		log.Debugf("SDVT operator %v: up to date (on-chain=%d)", operatorName, totalKeys)
+		return nil
+	}
+	log.Infof("Reconciling keys for SDVT operator %v (action=%s on-chain total=%v)", operatorName, action, totalKeys)
+
+	validatorPubkeys := make([]string, 0, totalKeys-offset)
 	for offset < totalKeys {
 		if i.stop {
 			return nil
@@ -127,6 +174,15 @@ func (i *Identify) processSDVTOperatorKeys(operator curated.NodeOperator) error 
 		offset += limit
 	}
 
+	if action == "incremental" {
+		upserted, err := i.dbClient.AppendLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolSDVT)
+		if err != nil {
+			return err
+		}
+		log.Infof("SDVT operator %v appended: on-chain=%d new=%d", operatorName, totalKeys, upserted)
+		return nil
+	}
+
 	upserted, removed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolSDVT)
 	if err != nil {
 		return err
@@ -137,7 +193,7 @@ func (i *Identify) processSDVTOperatorKeys(operator curated.NodeOperator) error 
 
 ///// CSM /////
 
-func (i *Identify) identifyCSM() error {
+func (i *Identify) identifyCSM(keyCounts map[string]uint64) error {
 	log.Debug("Creating a new instance of LidoContract")
 	csmContract, err := csm.NewCSMContract(i.iConfig.ElEndpoint)
 	// Check if there was an error
@@ -153,6 +209,7 @@ func (i *Identify) identifyCSM() error {
 	log.Debugf("Found %v operators", operatorsCount)
 
 	log.Debug("Getting keys for each operator")
+	stats := &lidoModuleStats{}
 	workerSemaphore := make(chan struct{}, 10)
 	var wg sync.WaitGroup
 
@@ -160,22 +217,16 @@ func (i *Identify) identifyCSM() error {
 		if i.stop {
 			break
 		}
-		operator, err := csmContract.GetOperatorData(big.NewInt(operatorIndex))
-		if err != nil {
-			wg.Wait()
-			return err
-		}
 		wg.Add(1)
 		workerSemaphore <- struct{}{}
 
-		go func(operator csm.NodeOperatorCustom) {
+		go func(operatorIndex int64) {
 			defer wg.Done()
-			err := i.processCSMOperatorKeys(operator)
-			if err != nil {
-				log.Fatalf("Error processing operator keys: %v", err)
+			if err := i.processCSMOperatorKeys(operatorIndex, keyCounts, stats); err != nil {
+				log.Errorf("Error reconciling CSM operator %v: %v", operatorIndex, err)
 			}
 			<-workerSemaphore
-		}(operator)
+		}(operatorIndex)
 	}
 	log.Debug("Finished getting keys for each operator")
 
@@ -183,6 +234,8 @@ func (i *Identify) identifyCSM() error {
 	if i.stop {
 		return nil
 	}
+	log.Infof("CSM module: operators=%d skipped=%d incremental=%d full=%d",
+		operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
 
 	log.Debug("Identifying lido curated validators")
 	err = i.dbClient.IdentifyLidoValidators()
@@ -194,24 +247,45 @@ func (i *Identify) identifyCSM() error {
 	return nil
 }
 
-func (i *Identify) processCSMOperatorKeys(operator csm.NodeOperatorCustom) error {
+func (i *Identify) processCSMOperatorKeys(operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
+	csmContract, err := csm.NewCSMContract(i.iConfig.ElEndpoint)
+	if err != nil {
+		return err
+	}
+
+	operator, err := csmContract.GetOperatorData(big.NewInt(operatorIndex))
+	if err != nil {
+		return err
+	}
+
 	operatorName := csm.GetOperatorName(operator)
 	totalKeys := uint64(operator.Operator.TotalDepositedKeys)
-	log.Infof("Reconciling keys for CSM operator %v (on-chain total=%v)", operatorName, totalKeys)
 
-	keysString := make([]string, 0, totalKeys)
-	if totalKeys > 0 {
-		lidoContract, err := csm.NewCSMContract(i.iConfig.ElEndpoint)
-		if err != nil {
-			return err
-		}
-		keys, err := lidoContract.GetOperatorKeys(operator, 0, totalKeys)
+	action, offset := i.lidoOperatorAction(db.LidoProtocolCSM, operator.Index, totalKeys, keyCounts, stats)
+	if action == "skip" {
+		log.Debugf("CSM operator %v: up to date (on-chain=%d)", operatorName, totalKeys)
+		return nil
+	}
+	log.Infof("Reconciling keys for CSM operator %v (action=%s on-chain total=%v)", operatorName, action, totalKeys)
+
+	keysString := make([]string, 0, totalKeys-offset)
+	if totalKeys > offset {
+		keys, err := csmContract.GetOperatorKeys(operator, offset, totalKeys-offset)
 		if err != nil {
 			return err
 		}
 		for _, key := range keys {
 			keysString = append(keysString, hex.EncodeToString(key))
 		}
+	}
+
+	if action == "incremental" {
+		upserted, err := i.dbClient.AppendLidoOperatorValidators(operatorName, operator.Index, keysString, db.LidoProtocolCSM)
+		if err != nil {
+			return err
+		}
+		log.Infof("CSM operator %v appended: on-chain=%d new=%d", operatorName, totalKeys, upserted)
+		return nil
 	}
 
 	upserted, removed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, keysString, db.LidoProtocolCSM)
@@ -225,7 +299,7 @@ func (i *Identify) processCSMOperatorKeys(operator csm.NodeOperatorCustom) error
 ////// Curated Module //////
 
 // identifyCuratedModule identifies the validators for the curated module and adds them to the lido table
-func (i *Identify) identifyCuratedModule() error {
+func (i *Identify) identifyCuratedModule(keyCounts map[string]uint64) error {
 	log.Debug("Creating a new instance of LidoContract")
 	lidoContract, err := curated.NewCuratedModuleContract(i.iConfig.ElEndpoint)
 	// Check if there was an error
@@ -242,6 +316,7 @@ func (i *Identify) identifyCuratedModule() error {
 	log.Debugf("Found %v operators", operatorsCount)
 
 	log.Debug("Getting keys for each operator")
+	stats := &lidoModuleStats{}
 	workerSemaphore := make(chan struct{}, 10)
 	var wg sync.WaitGroup
 
@@ -249,21 +324,16 @@ func (i *Identify) identifyCuratedModule() error {
 		if i.stop {
 			break
 		}
-		operator, err := lidoContract.GetOperatorData(big.NewInt(operatorIndex))
-		if err != nil {
-			wg.Wait()
-			return err
-		}
 		wg.Add(1)
 		workerSemaphore <- struct{}{}
 
-		go func(operator curated.NodeOperator) {
+		go func(operatorIndex int64) {
 			defer wg.Done()
-			if err := i.processCuratedOperatorKeys(operator); err != nil {
-				log.Errorf("Error reconciling curated operator %v: %v", operator.Index, err)
+			if err := i.processCuratedOperatorKeys(operatorIndex, keyCounts, stats); err != nil {
+				log.Errorf("Error reconciling curated operator %v: %v", operatorIndex, err)
 			}
 			<-workerSemaphore
-		}(operator)
+		}(operatorIndex)
 	}
 	log.Debug("Finished getting keys for each operator")
 
@@ -271,6 +341,8 @@ func (i *Identify) identifyCuratedModule() error {
 	if i.stop {
 		return nil
 	}
+	log.Infof("Curated module: operators=%d skipped=%d incremental=%d full=%d",
+		operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
 
 	log.Debug("Identifying lido curated validators")
 	err = i.dbClient.IdentifyLidoValidators()
@@ -282,18 +354,28 @@ func (i *Identify) identifyCuratedModule() error {
 	return nil
 }
 
-func (i *Identify) processCuratedOperatorKeys(operator curated.NodeOperator) error {
+func (i *Identify) processCuratedOperatorKeys(operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
 	lidoContract, err := curated.NewCuratedModuleContract(i.iConfig.ElEndpoint)
+	if err != nil {
+		return err
+	}
+
+	operator, err := lidoContract.GetOperatorData(big.NewInt(operatorIndex))
 	if err != nil {
 		return err
 	}
 
 	operatorName := curated.GetOperatorName(operator)
 	totalKeys := operator.TotalSigningKeys
-	log.Infof("Reconciling keys for curated operator %v (on-chain total=%v)", operatorName, totalKeys)
 
-	validatorPubkeys := make([]string, 0, totalKeys)
-	offset := uint64(0)
+	action, offset := i.lidoOperatorAction(db.LidoProtocolCurated, operator.Index, totalKeys, keyCounts, stats)
+	if action == "skip" {
+		log.Debugf("Curated operator %v: up to date (on-chain=%d)", operatorName, totalKeys)
+		return nil
+	}
+	log.Infof("Reconciling keys for curated operator %v (action=%s on-chain total=%v)", operatorName, action, totalKeys)
+
+	validatorPubkeys := make([]string, 0, totalKeys-offset)
 	for offset < totalKeys {
 		if i.stop {
 			return nil
@@ -312,6 +394,15 @@ func (i *Identify) processCuratedOperatorKeys(operator curated.NodeOperator) err
 			validatorPubkeys = append(validatorPubkeys, hex.EncodeToString(key))
 		}
 		offset += limit
+	}
+
+	if action == "incremental" {
+		upserted, err := i.dbClient.AppendLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolCurated)
+		if err != nil {
+			return err
+		}
+		log.Infof("Curated operator %v appended: on-chain=%d new=%d", operatorName, totalKeys, upserted)
+		return nil
 	}
 
 	upserted, removed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, validatorPubkeys, db.LidoProtocolCurated)
