@@ -19,6 +19,15 @@ const (
 		WHERE v.f_withdrawal_address != ''
 			AND (t.f_validator_pubkey IS NULL
 				OR t.f_pool_name IS DISTINCT FROM m.f_pool_name)
+			-- Skip validators that a later phase claims (see issue #28): it
+			-- would overwrite the tag again in the same run.
+			AND t.f_pool_name IS DISTINCT FROM 'coinbase'
+			AND NOT EXISTS (SELECT 1 FROM t_rocketpool r
+				WHERE r.f_validator_pubkey = v.f_validator_pubkey)
+			AND NOT EXISTS (SELECT 1 FROM t_lido l
+				WHERE l.f_validator_pubkey = v.f_validator_pubkey)
+			AND NOT EXISTS (SELECT 1 FROM t_validators_insert vi
+				WHERE vi.f_validator_pubkey = v.f_validator_pubkey)
 		ON CONFLICT (f_validator_pubkey) DO UPDATE SET
 			f_pool_name = EXCLUDED.f_pool_name
 		WHERE t_identified_validators.f_pool_name IS DISTINCT FROM EXCLUDED.f_pool_name;
