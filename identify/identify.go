@@ -71,8 +71,15 @@ func (i *Identify) Run() {
 
 	if i.iConfig.RecreateTable && !i.stop {
 		startTime := time.Now()
+		// Full rebuilds also refresh t_validator_last_deposit from scratch, as
+		// a periodic safety valve against any drift in the incremental upserts.
+		log.Info("Rebuilding validator last deposit table")
+		err := i.dbClient.RebuildValidatorLastDeposit()
+		if err != nil {
+			log.Errorf("Error rebuilding validator last deposit table: %v. Skipping to next step.", err)
+		}
 		log.Info("Truncating identified validators table")
-		err := i.dbClient.TruncateIdentifiedValidators()
+		err = i.dbClient.TruncateIdentifiedValidators()
 		if err != nil {
 			log.Errorf("Error truncating identified validators table: %v. Skipping to next step.", err)
 		} else {

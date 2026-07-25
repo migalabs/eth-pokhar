@@ -8,23 +8,13 @@ const (
 			f_validator_pubkey,
 			f_pool_name
 		)
-		SELECT DISTINCT 
-			t1.f_validator_pubkey, 
-			t2.f_pool_name 
-		FROM (
-			SELECT 
-				f_validator_pubkey,
-				f_withdrawal_address,
-				ROW_NUMBER() OVER (
-					PARTITION BY f_validator_pubkey 
-					ORDER BY f_block_num DESC
-				) as rn
-			FROM t_beacon_deposits
-			WHERE f_withdrawal_address!=''
-		) t1
-		INNER JOIN t_withdrawal_address_insert t2
-			ON t1.f_withdrawal_address = t2.f_withdrawal_address
-		WHERE t1.rn = 1
+		SELECT
+			v.f_validator_pubkey,
+			m.f_pool_name
+		FROM t_validator_last_deposit v
+		INNER JOIN t_withdrawal_address_insert m
+			ON v.f_withdrawal_address = m.f_withdrawal_address
+		WHERE v.f_withdrawal_address != ''
 		ON CONFLICT (f_validator_pubkey) DO UPDATE SET
 			f_pool_name = EXCLUDED.f_pool_name
 		WHERE t_identified_validators.f_pool_name IS DISTINCT FROM EXCLUDED.f_pool_name;
