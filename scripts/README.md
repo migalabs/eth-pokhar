@@ -33,7 +33,26 @@ export TEXTFILE_DIR=/path/to/node_exporter/textfiles
 export CRON_NAME=labels_sync_mainnet
 ```
 
-Note: the import runs server-side via the `postgresql()` table function, so `PG_HOST:PG_PORT` must be reachable from the ClickHouse **server**, not from the shell running the script. If the Postgres is remote, open the tunnel before invoking the script and bind it on an address the server can reach.
+Note: the import runs server-side via the `postgresql()` table function, so `PG_HOST:PG_PORT` must be reachable from the ClickHouse **server**, not from the shell running the script. If the Postgres is remote, open the tunnel before invoking the script and bind it on an address the server can reach, or use the launcher below which handles that.
+
+## run-labels-sync.sh
+
+Launcher meant to be the cron entry point. It sources a local env file (argument, or `labels-sync.env` next to the script by default), optionally opens an SSH tunnel to the labels Postgres, waits until the tunnel actually accepts connections, and runs `sync-labels-to-clickhouse.sh` with a cleanup trap that closes the tunnel on exit. Keeps every deployment on the same reviewed logic: the only thing that lives outside the repo is the env file with credentials and endpoints.
+
+```bash
+# crontab, every 6 hours
+0 */6 * * * /path/to/scripts/run-labels-sync.sh /path/to/labels-sync.env >> /var/log/labels-sync.log 2>&1
+```
+
+Tunnel variables, all optional, set in the env file:
+
+```bash
+export SYNC_TUNNEL_SSH_HOST=labels-db-host   # unset: no tunnel, PG_HOST used as-is
+export SYNC_TUNNEL_BIND=0.0.0.0              # bind on an address the ClickHouse server reaches
+export SYNC_TUNNEL_PORT=15440
+export SYNC_TUNNEL_TARGET=localhost:5439     # Postgres as seen from the ssh host
+export SYNC_TUNNEL_WAIT_SECS=20
+```
 
 ### Recommended alerts
 
