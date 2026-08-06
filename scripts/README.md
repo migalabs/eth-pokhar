@@ -54,7 +54,23 @@ export SYNC_TUNNEL_TARGET=localhost:5439     # Postgres as seen from the ssh hos
 export SYNC_TUNNEL_WAIT_SECS=20
 ```
 
+### Credentials handling
+
+Secrets never travel on a command line, where any local user can read them in `/proc/<pid>/cmdline` for the duration of the call:
+
+- The ClickHouse password is passed through the `CLICKHOUSE_PASSWORD` environment variable (honored by clickhouse-client). Docker-based `CH_CLIENT` values must forward it without a value so it never hits a command line either: `CH_CLIENT="docker exec -i -e CLICKHOUSE_PASSWORD my-clickhouse clickhouse-client"`.
+- Queries go through stdin instead of `--query`, which also keeps the Postgres credentials embedded in the `postgresql()` table function calls off the process list. ClickHouse masks table function secrets in `system.query_log`; defining a server-side named collection for the labels Postgres removes them from the query text entirely if you want the extra belt.
+- The env file remains the at-rest copy of the secrets: keep it readable only by the cron user.
+
+### Concurrency
+
+The script takes a non-blocking `flock` on `SYNC_LOCK_FILE` (default `/tmp/labels-sync-<db>-<port>.lock`) and aborts with a non-zero status if another run against the same target is still going. Overlapping runs would race on the same staging table, and a double `EXCHANGE TABLES` could silently re-apply a stale mapping with both runs reporting success. A skipped run raises the exit-status metric, which is the correct signal: the interesting event is the previous run still holding the lock.
+
+### On-call note: failures after the swap
+
+Every failure before `EXCHANGE TABLES` leaves the live mapping untouched: rerunning is always safe. Failures AFTER the swap (mirror sync, version stamping) exit non-zero for alerting but the new mapping is already live; the log prints an explicit warning in that case. Do not "roll back" on the basis of the exit code alone: rollback is only ever the manual `EXCHANGE TABLES`, and only if the applied snapshot itself is the problem.
+
 ### Recommended alerts
 
 - `time() - cron_job_last_run_timestamp_seconds{cron_name="..."} > 2 * <sync period>`: the sync stopped running (this once went unnoticed for two months).
-- `cron_job_last_run_exit_status{cron_name="..."} != 0`: the last snapshot was rejected by a gate or the import failed.
+- `cron_job_last_run_exit_status{cron_name="..."} != 0`: the last snapshot was rejected by a gate, the import failed, a concurrent run was skipped, or a post-swap step failed (see the on-call note).

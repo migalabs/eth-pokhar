@@ -36,6 +36,17 @@
 #                              exempt from the pool-drop gate (renames/splits)
 #   TEXTFILE_DIR               optional node_exporter textfile directory
 #   CRON_NAME                  metric label (default: labels_sync)
+#   SYNC_LOCK_FILE             lock path (default: /tmp/labels-sync-<db>-<port>.lock)
+#
+# Credentials: the ClickHouse password travels via the CLICKHOUSE_PASSWORD
+# environment variable and queries via stdin, never on a command line (which
+# any local user can read in /proc/<pid>/cmdline). Docker-based CH_CLIENT
+# values must forward the variable, e.g.:
+#   CH_CLIENT="docker exec -i -e CLICKHOUSE_PASSWORD my-clickhouse clickhouse-client"
+# The Postgres credentials are embedded in the postgresql() query text by
+# necessity (table function syntax); stdin keeps them off the process list
+# and ClickHouse masks table function secrets in its query_log. A server-side
+# named collection removes them from the query text entirely if preferred.
 #
 set -u
 
@@ -76,8 +87,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# One run at a time per target database: overlapping runs would race on the
+# same staging table and a double EXCHANGE could silently re-apply a stale
+# mapping with both runs reporting success.
+SYNC_LOCK_FILE="${SYNC_LOCK_FILE:-/tmp/labels-sync-${CH_DB}-${CH_PORT}.lock}"
+exec 9>"$SYNC_LOCK_FILE"
+if ! flock -n 9; then
+    echo "$LOG_PREFIX ERROR: another sync targeting ${CH_DB}:${CH_PORT} is still running (lock: $SYNC_LOCK_FILE), aborting"
+    exit 1
+fi
+
+export CLICKHOUSE_PASSWORD="$CH_PASS"
 ch() {
-    $CH_CLIENT --port "$CH_PORT" --user "$CH_USER" --password "$CH_PASS" --database "$CH_DB" --query "$1"
+    printf '%s' "$1" | $CH_CLIENT --port "$CH_PORT" --user "$CH_USER" --database "$CH_DB"
 }
 
 echo "$LOG_PREFIX $(date -u +%FT%TZ) Starting labels sync..."
@@ -157,27 +179,34 @@ fi
 echo "$LOG_PREFIX Gates passed. Applying snapshot atomically..."
 ch "EXCHANGE TABLES t_eth2_pubkeys AND t_eth2_pubkeys_staging" || exit 1
 
+# From this point on the new mapping is LIVE: any failure below makes the run
+# exit non-zero for alerting purposes, but must not be read as "the sync did
+# not happen". Rolling back requires an explicit EXCHANGE TABLES, not a rerun.
+post_swap_fail() {
+    echo "$LOG_PREFIX WARNING: $1 failed AFTER the swap: the new t_eth2_pubkeys mapping IS already live. Do not roll back based on this exit code alone."
+    exit 1
+}
+
 # ------------------------------------------------- optional t_pubkey_pool mirror
 # Some deployments also serve a pubkey -> pool mirror without requiring a
 # val_idx assignment (labels for deposits still in the pending queue). Same
 # staging + EXCHANGE pattern; the source snapshot already passed the gates.
 if [ "${SYNC_PUBKEY_POOL:-false}" = "true" ]; then
     echo "$LOG_PREFIX Syncing t_pubkey_pool mirror..."
-    ch "CREATE TABLE IF NOT EXISTS t_pubkey_pool_staging AS t_pubkey_pool" || exit 1
-    ch "TRUNCATE TABLE t_pubkey_pool_staging" || exit 1
+    ch "CREATE TABLE IF NOT EXISTS t_pubkey_pool_staging AS t_pubkey_pool" || post_swap_fail "t_pubkey_pool staging setup"
+    ch "TRUNCATE TABLE t_pubkey_pool_staging" || post_swap_fail "t_pubkey_pool staging truncate"
     ch "
         INSERT INTO t_pubkey_pool_staging (f_public_key, f_pool_name)
         SELECT
             concat('0x', iv.f_validator_pubkey) AS f_public_key,
             iv.f_pool_name
         FROM postgresql('${PG_HOST}:${PG_PORT}', '${PG_DB}', 't_identified_validators', '${PG_USER}', '${PG_PASS}') AS iv
-    " || { echo "$LOG_PREFIX ERROR: t_pubkey_pool import failed, live mirror untouched"; exit 1; }
-    PP_COUNT=$(ch "SELECT count() FROM t_pubkey_pool_staging") || exit 1
+    " || post_swap_fail "t_pubkey_pool import (live mirror untouched)"
+    PP_COUNT=$(ch "SELECT count() FROM t_pubkey_pool_staging") || post_swap_fail "t_pubkey_pool count"
     if [ "$PP_COUNT" -eq 0 ]; then
-        echo "$LOG_PREFIX GATE FAILED: t_pubkey_pool snapshot is empty, live mirror untouched"
-        exit 1
+        post_swap_fail "t_pubkey_pool gate: snapshot is empty (live mirror untouched)"
     fi
-    ch "EXCHANGE TABLES t_pubkey_pool AND t_pubkey_pool_staging" || exit 1
+    ch "EXCHANGE TABLES t_pubkey_pool AND t_pubkey_pool_staging" || post_swap_fail "t_pubkey_pool swap (live mirror untouched)"
     echo "$LOG_PREFIX t_pubkey_pool updated: $PP_COUNT entries"
 fi
 
@@ -187,8 +216,8 @@ ch "CREATE TABLE IF NOT EXISTS t_eth2_pubkeys_version (
         f_version UInt64,
         f_synced_at DateTime,
         f_entries UInt64
-    ) ENGINE = ReplacingMergeTree(f_version) ORDER BY tuple()" || exit 1
-ch "INSERT INTO t_eth2_pubkeys_version VALUES ($VERSION, now(), $NEW_COUNT)" || exit 1
+    ) ENGINE = ReplacingMergeTree(f_version) ORDER BY tuple()" || post_swap_fail "version table setup"
+ch "INSERT INTO t_eth2_pubkeys_version VALUES ($VERSION, now(), $NEW_COUNT)" || post_swap_fail "version stamp"
 
 echo "$LOG_PREFIX Applied version $VERSION: $PREV_COUNT -> $NEW_COUNT entries"
 echo "$LOG_PREFIX Previous mapping kept in t_eth2_pubkeys_staging (rollback: EXCHANGE TABLES again)"
