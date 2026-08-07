@@ -157,6 +157,23 @@ This table stores the validators with the pool/entity that operates them. Uniden
 
 - `f_validator_pubkey`: The public key of the validator.
 - `f_pool_name`: The name of the pool in which the validators are participating.
+- `f_operator` / `f_custodian`: see [Dual tagging](#dual-tagging-custodian--operator).
+
+## Dual tagging (custodian / operator)
+
+Custody (who controls the withdrawal credentials) and operation (who runs the validator) are two different questions, and `f_pool_name` can only store one answer: when both are known and differ, the [identification priority](#identification-priority) decides which one survives. The dimension columns give each answer its own slot:
+
+- `f_operator`: pure operation label. Sources, strongest first: Lido registry operator name, Rocket Pool registry, depositor mapping (`t_depositors_insert`), coinbase detection as fallback.
+- `f_custodian`: pure custody label. Sources: withdrawal address mapping (`t_withdrawal_address_insert`), coinbase detection as fallback.
+
+Semantics to keep in mind:
+
+- `NULL` means "no declared signal for this dimension", not "unknown entity".
+- Heuristic labels (`whale_0x...`, `solo_stakers`) and manual pins (`t_validators_insert`) live only in `f_pool_name`: their dimension is undeclared, so they never populate the pure columns.
+- `f_pool_name` keeps its historical behavior and priority chain unchanged: it is the display/legacy label and existing consumers are unaffected.
+- The columns are recomputed at the end of every identify run, deterministically from the mapping tables, so incremental runs and full rebuilds converge to the same values.
+
+Because each dimension has its own column, populating a custody mapping can never be shadowed by an operator label (or the other way around): the mapping tables can grow freely in both dimensions.
 
 ## Utilizing custom off-chain data
 

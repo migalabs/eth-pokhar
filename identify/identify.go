@@ -198,6 +198,20 @@ func (i *Identify) Run() {
 		}
 	}
 
+	// Pure dimension columns (custodian/operator) derive from the settled
+	// mappings, so they are computed once at the very end instead of taking
+	// part in the phase precedence dance. See migration 000012.
+	if !i.stop {
+		startTime := time.Now()
+		log.Info("Applying dimension columns (operator/custodian)")
+		rows, err := i.dbClient.ApplyDimensionColumns()
+		if err != nil {
+			log.Errorf("Error applying dimension columns: %v. Skipping to next step.", err)
+		} else {
+			log.Infof("Applied dimension columns (%d rows) in %v", rows, time.Since(startTime))
+		}
+	}
+
 	endTime := time.Now()
 	log.Infof("Identify routine finished in %v", endTime.Sub(initTime))
 	i.CloseConnections()
