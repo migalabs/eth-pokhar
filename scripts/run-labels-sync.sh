@@ -12,7 +12,12 @@
 #   SYNC_TUNNEL_SSH_HOST   ssh host (alias or user@host) that can reach the
 #                          labels Postgres. Empty or unset: no tunnel is
 #                          opened and PG_HOST/PG_PORT are used as-is.
-#   SYNC_TUNNEL_BIND       local address to bind (default 127.0.0.1)
+#   SYNC_TUNNEL_BIND       local address to bind (default 127.0.0.1). The
+#                          postgresql() import runs inside the ClickHouse
+#                          SERVER: if that server is a bridge-networked
+#                          container, its loopback is isolated from the host
+#                          and cannot reach 127.0.0.1, so set 0.0.0.0 or the
+#                          docker bridge IP the server can actually reach.
 #   SYNC_TUNNEL_PORT       local port to bind (default 15440)
 #   SYNC_TUNNEL_TARGET     host:port of Postgres as seen from the ssh host
 #                          (default localhost:5432)

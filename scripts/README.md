@@ -55,6 +55,8 @@ export SYNC_TUNNEL_TARGET=localhost:5439     # Postgres as seen from the ssh hos
 export SYNC_TUNNEL_WAIT_SECS=20
 ```
 
+Mind the bind address: the import runs inside the ClickHouse **server**, so the tunnel must listen where that server can reach it. The default `127.0.0.1` only works when ClickHouse runs directly on the launcher's host (or with `--network=host`); a bridge-networked ClickHouse container has its own isolated loopback and will never reach the host's `127.0.0.1`, even though the launcher's health check passes. For that layout bind on `0.0.0.0` or the docker bridge IP, and set `PG_HOST` accordingly (e.g. the bridge gateway).
+
 ### Credentials handling
 
 Secrets never travel on a command line, where any local user can read them in `/proc/<pid>/cmdline` for the duration of the call:
