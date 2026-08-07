@@ -71,8 +71,15 @@ func (i *Identify) Run() {
 
 	if i.iConfig.RecreateTable && !i.stop {
 		startTime := time.Now()
+		// Full rebuilds also refresh t_validator_last_deposit from scratch, as
+		// a periodic safety valve against any drift in the incremental upserts.
+		log.Info("Rebuilding validator last deposit table")
+		err := i.dbClient.RebuildValidatorLastDeposit()
+		if err != nil {
+			log.Errorf("Error rebuilding validator last deposit table: %v. Skipping to next step.", err)
+		}
 		log.Info("Truncating identified validators table")
-		err := i.dbClient.TruncateIdentifiedValidators()
+		err = i.dbClient.TruncateIdentifiedValidators()
 		if err != nil {
 			log.Errorf("Error truncating identified validators table: %v. Skipping to next step.", err)
 		} else {
@@ -105,18 +112,12 @@ func (i *Identify) Run() {
 		}
 	}
 
-	if !i.stop {
-		startTime := time.Now()
-		log.Info("Applying withdrawal address insert")
-		err := i.dbClient.ApplyWithdrawalAddressInsert()
-		if err != nil {
-			log.Errorf("Error applying withdrawal address insert: %v. Skipping to next step.", err)
-		} else {
-			endTime := time.Now()
-			log.Infof("Applied withdrawal address insert in %v", endTime.Sub(startTime))
-		}
-	}
-
+	// Depositor tags (typically the node operator) are applied BEFORE
+	// withdrawal-address tags (the owner of the stake) on purpose: both
+	// upserts resolve conflicts positionally (last write wins), and a
+	// withdrawal credential is a stronger ownership signal than who sent
+	// the deposit transaction, since batch-deposit contracts are shared
+	// infrastructure. See issue #28.
 	if !i.stop {
 		startTime := time.Now()
 		log.Info("Applying depositors insert")
@@ -126,6 +127,18 @@ func (i *Identify) Run() {
 		} else {
 			endTime := time.Now()
 			log.Infof("Applied depositors insert in %v", endTime.Sub(startTime))
+		}
+	}
+
+	if !i.stop {
+		startTime := time.Now()
+		log.Info("Applying withdrawal address insert")
+		err := i.dbClient.ApplyWithdrawalAddressInsert()
+		if err != nil {
+			log.Errorf("Error applying withdrawal address insert: %v. Skipping to next step.", err)
+		} else {
+			endTime := time.Now()
+			log.Infof("Applied withdrawal address insert in %v", endTime.Sub(startTime))
 		}
 	}
 

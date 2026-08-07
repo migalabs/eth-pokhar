@@ -17,11 +17,15 @@ import (
 
 func (b *BeaconDepositorsTransactions) updateDepositorsTransactions() {
 	log.Info("Getting checkpoints")
-	checkpoints, err := b.dbClient.ObtainCheckpointPerDepositor()
+	checkpoints, err := b.dbClient.ObtainCheckpointPerDepositor(b.iConfig.SkipTagged)
 	if err != nil {
 		log.Fatalf("Error obtaining checkpoints: %s", err.Error())
 	}
-	log.Info("Got checkpoints")
+	if b.iConfig.SkipTagged {
+		log.Infof("Got checkpoints for %d depositors with untagged validators (skip-tagged enabled)", len(checkpoints))
+	} else {
+		log.Infof("Got checkpoints for %d depositors", len(checkpoints))
+	}
 
 	log.Info("Fetching new transactions")
 

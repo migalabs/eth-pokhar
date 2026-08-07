@@ -106,7 +106,10 @@ func (b *BeaconDepositorsTransactions) processDepositTransfers(transfers []alche
 		close(transferCh)
 	}()
 
+	var collectorWG sync.WaitGroup
+	collectorWG.Add(1)
 	go func() {
+		defer collectorWG.Done()
 		var deposits []models.BeaconDeposit
 		for deposit := range depositsCh {
 			deposits = append(deposits, deposit)
@@ -128,6 +131,11 @@ func (b *BeaconDepositorsTransactions) processDepositTransfers(transfers []alche
 		}
 	}
 	close(depositsCh)
+
+	// Wait for the collector to persist the batch before returning: the caller
+	// tears down the DB pool right after this routine, and an unawaited
+	// collector still writing would race it and hit a closed pool.
+	collectorWG.Wait()
 
 	return nil
 }

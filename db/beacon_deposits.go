@@ -65,8 +65,16 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 	}
 	defer conn.Release()
 
+	// Deposits and the t_validator_last_deposit refresh commit atomically so
+	// the materialized table never drifts from t_beacon_deposits.
+	tx, err := conn.Begin(p.ctx)
+	if err != nil {
+		wlog.Fatalf("could not begin transaction: %s", err.Error())
+	}
+	defer tx.Rollback(p.ctx)
+
 	// Create a temporary table with a unique constraint
-	_, err = conn.Exec(p.ctx, `
+	_, err = tx.Exec(p.ctx, `
         CREATE TEMP TABLE IF NOT EXISTS `+tempTableName+` (
             f_block_num bigint,
             f_depositor text,
@@ -80,7 +88,7 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 	}
 
 	// Copy data into the temporary table, ignoring duplicates
-	_, err = conn.CopyFrom(
+	_, err = tx.CopyFrom(
 		p.ctx,
 		pgx.Identifier{tempTableName},
 		[]string{"f_block_num", "f_depositor", "f_tx_hash", "f_validator_pubkey", "f_withdrawal_address"},
@@ -91,7 +99,7 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 	}
 
 	// Insert non-duplicate rows from the temporary table into the target table
-	count, err := conn.Exec(p.ctx, `
+	count, err := tx.Exec(p.ctx, `
         INSERT INTO t_beacon_deposits (f_block_num, f_depositor, f_tx_hash, f_validator_pubkey, f_withdrawal_address)
         SELECT f_block_num, f_depositor, f_tx_hash, f_validator_pubkey, f_withdrawal_address
         FROM `+tempTableName+`
@@ -101,10 +109,20 @@ func (p *PostgresDBService) CopyBeaconDeposits(rowSrc []models.BeaconDeposit) in
 		wlog.Fatalf("could not insert rows into target table: %s", err.Error())
 	}
 
+	if count.RowsAffected() > 0 {
+		if err := p.upsertValidatorLastDeposit(tx, tempTableName); err != nil {
+			wlog.Fatalf("could not refresh t_validator_last_deposit: %s", err.Error())
+		}
+	}
+
 	// Drop the temporary table
-	_, err = conn.Exec(p.ctx, `DROP TABLE IF EXISTS `+tempTableName)
+	_, err = tx.Exec(p.ctx, `DROP TABLE IF EXISTS `+tempTableName)
 	if err != nil {
 		wlog.Fatalf("could not drop temporary table: %s", err.Error())
+	}
+
+	if err := tx.Commit(p.ctx); err != nil {
+		wlog.Fatalf("could not commit deposits transaction: %s", err.Error())
 	}
 	if count.RowsAffected() > 0 {
 		wlog.Debugf("persisted %d rows in %f seconds", count.RowsAffected(), time.Since(startTime).Seconds())

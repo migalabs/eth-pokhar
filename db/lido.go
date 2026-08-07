@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -24,10 +25,11 @@ const (
 	`
 
 	identifyLidoValidators = `
-	UPDATE t_identified_validators 
+	UPDATE t_identified_validators
 	SET f_pool_name = t_lido.f_operator
 	FROM t_lido
-	WHERE t_identified_validators.f_validator_pubkey = t_lido.f_validator_pubkey;
+	WHERE t_identified_validators.f_validator_pubkey = t_lido.f_validator_pubkey
+		AND t_identified_validators.f_pool_name IS DISTINCT FROM t_lido.f_operator;
 	`
 	LidoProtocolCurated = "curated"
 	LidoProtocolCSM     = "csm"
@@ -159,6 +161,117 @@ func (p *PostgresDBService) ReconcileLidoOperatorValidators(operator string, ope
 			operator, protocol, upserted, removed, time.Since(startTime).Seconds())
 	}
 	return upserted, removed, nil
+}
+
+// LidoOperatorCountKey builds the lookup key used by the map returned from
+// ObtainLidoOperatorKeyCounts.
+func LidoOperatorCountKey(protocol string, operatorIndex uint64) string {
+	return fmt.Sprintf("%s/%d", protocol, operatorIndex)
+}
+
+// ObtainLidoOperatorKeyCounts returns how many keys t_lido currently holds per
+// (protocol, operator index). Used as the checkpoint to decide whether an
+// operator needs no work, an incremental key fetch or a full reconcile.
+func (p *PostgresDBService) ObtainLidoOperatorKeyCounts() (map[string]uint64, error) {
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "error acquiring database connection")
+	}
+	defer conn.Release()
+
+	rows, err := conn.Query(p.ctx, `
+		SELECT f_protocol, f_operator_index, count(*)
+		FROM t_lido
+		GROUP BY f_protocol, f_operator_index;
+	`)
+	if err != nil {
+		return nil, errors.Wrap(err, "error obtaining lido operator key counts")
+	}
+	defer rows.Close()
+
+	counts := make(map[string]uint64)
+	for rows.Next() {
+		var protocol string
+		var operatorIndex int64
+		var count int64
+		if err := rows.Scan(&protocol, &operatorIndex, &count); err != nil {
+			return nil, errors.Wrap(err, "error scanning lido operator key count")
+		}
+		counts[LidoOperatorCountKey(protocol, uint64(operatorIndex))] = uint64(count)
+	}
+	return counts, nil
+}
+
+// AppendLidoOperatorValidators upserts a batch of keys for an operator WITHOUT
+// removing anything. Meant for the incremental path, where only the keys added
+// on-chain since the last run are fetched: passing such a partial set to
+// ReconcileLidoOperatorValidators would delete every previously stored key of
+// the operator, so removals are handled exclusively by the full reconcile.
+func (p *PostgresDBService) AppendLidoOperatorValidators(operator string, operatorIndex uint64, newKeys []string, protocol string) (int64, error) {
+	if len(newKeys) == 0 {
+		return 0, nil
+	}
+	p.writerThreadsWG.Add(1)
+	defer p.writerThreadsWG.Done()
+	startTime := time.Now()
+
+	conn, err := p.psqlPool.Acquire(p.ctx)
+	if err != nil {
+		return 0, errors.Wrap(err, "error acquiring database connection")
+	}
+	defer conn.Release()
+
+	tx, err := conn.Begin(p.ctx)
+	if err != nil {
+		return 0, errors.Wrap(err, "error beginning transaction")
+	}
+	defer tx.Rollback(p.ctx)
+
+	tempTableName := "tmp_lido_append_" + strings.ReplaceAll(uuid.New().String(), "-", "_")
+	_, err = tx.Exec(p.ctx, `
+		CREATE TEMP TABLE `+tempTableName+` (
+			f_validator_pubkey text PRIMARY KEY
+		) ON COMMIT DROP;
+	`)
+	if err != nil {
+		return 0, errors.Wrap(err, "error creating temp table")
+	}
+
+	rows := make([][]interface{}, len(newKeys))
+	for i, k := range newKeys {
+		rows[i] = []interface{}{k}
+	}
+	_, err = tx.CopyFrom(p.ctx, pgx.Identifier{tempTableName}, []string{"f_validator_pubkey"}, pgx.CopyFromRows(rows))
+	if err != nil {
+		return 0, errors.Wrap(err, "error copying new keys into temp table")
+	}
+
+	insCmd, err := tx.Exec(p.ctx, `
+		INSERT INTO t_lido (f_validator_pubkey, f_operator, f_operator_index, f_protocol)
+		SELECT t.f_validator_pubkey, $1, $2, $3
+		FROM `+tempTableName+` t
+		ON CONFLICT (f_validator_pubkey) DO UPDATE
+			SET f_operator = EXCLUDED.f_operator,
+			    f_operator_index = EXCLUDED.f_operator_index,
+			    f_protocol = EXCLUDED.f_protocol
+		WHERE t_lido.f_operator       IS DISTINCT FROM EXCLUDED.f_operator
+		   OR t_lido.f_operator_index IS DISTINCT FROM EXCLUDED.f_operator_index
+		   OR t_lido.f_protocol       IS DISTINCT FROM EXCLUDED.f_protocol;
+	`, operator, operatorIndex, protocol)
+	if err != nil {
+		return 0, errors.Wrap(err, "error appending new keys")
+	}
+	upserted := insCmd.RowsAffected()
+
+	if err := tx.Commit(p.ctx); err != nil {
+		return 0, errors.Wrap(err, "error committing append transaction")
+	}
+
+	if upserted > 0 {
+		wlog.Debugf("appended %d keys for operator %v (proto=%v) in %.2fs",
+			upserted, operator, protocol, time.Since(startTime).Seconds())
+	}
+	return upserted, nil
 }
 
 // CopyLidoOperatorValidators copies the validators to the database for a given operator
