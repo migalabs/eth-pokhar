@@ -9,6 +9,7 @@ Distributes the labels produced by the identify pipeline (Postgres `t_identified
 - **Gated**: the snapshot is rejected, keeping the previous mapping, if it is empty, if it shrinks below `SYNC_MIN_COUNT_RATIO` of the previous count, or if any existing pool loses more than `SYNC_MAX_POOL_DROP` validators. Legitimate renames or splits are declared in the allowlist file (`SYNC_POOL_RENAME_ALLOWLIST`, one pool name per line) for the run where they happen.
 - **Monitored**: with `TEXTFILE_DIR` set, exports `cron_job_last_run_timestamp_seconds`, `cron_job_last_run_time_taken_milliseconds` and `cron_job_last_run_exit_status` for node_exporter's textfile collector.
 - **Optional mirror**: with `SYNC_PUBKEY_POOL=true`, also refreshes the `t_pubkey_pool` mirror (pubkey to pool without a val_idx, used to label deposits still in the pending queue) with the same staging plus `EXCHANGE TABLES` pattern. Enable it only on deployments that have that table.
+- **Single source read**: Postgres is read exactly once per run into `t_labels_snapshot`, and both the main mapping and the mirror are derived from it. All distributed tables therefore reflect the same instant of the source and are covered by the same gates; there is no window for cross-table drift between them.
 
 ### Example
 

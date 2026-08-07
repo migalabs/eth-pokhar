@@ -113,11 +113,28 @@ if [ "$PREV_COUNT" -gt 0 ] && [ "$SYNC_MAX_POOL_DROP" -gt 0 ]; then
         > "$TMPDIR_SYNC/pools_prev.tsv" || exit 1
 fi
 
-# ---------------------------------------------------------------- import to staging
+# ---------------------------------------------------------------- import snapshot
+# Postgres is read exactly ONCE per run into t_labels_snapshot; the main
+# mapping and the optional t_pubkey_pool mirror are both derived from it, so
+# every distributed table reflects the same instant of the source and the
+# gates below vouch for all of them. A second postgresql() read for the
+# mirror would reintroduce the cross-table drift issue #31 exists to prevent.
+ch "CREATE TABLE IF NOT EXISTS t_labels_snapshot (
+        f_validator_pubkey String,
+        f_pool_name String
+    ) ENGINE = MergeTree ORDER BY tuple()" || exit 1
+ch "TRUNCATE TABLE t_labels_snapshot" || exit 1
+
+echo "$LOG_PREFIX Importing labels snapshot from Postgres..."
+ch "
+    INSERT INTO t_labels_snapshot (f_validator_pubkey, f_pool_name)
+    SELECT f_validator_pubkey, f_pool_name
+    FROM postgresql('${PG_HOST}:${PG_PORT}', '${PG_DB}', 't_identified_validators', '${PG_USER}', '${PG_PASS}')
+" || { echo "$LOG_PREFIX ERROR: snapshot import failed, live mapping untouched"; exit 1; }
+
 ch "CREATE TABLE IF NOT EXISTS t_eth2_pubkeys_staging AS t_eth2_pubkeys" || exit 1
 ch "TRUNCATE TABLE t_eth2_pubkeys_staging" || exit 1
 
-echo "$LOG_PREFIX Importing snapshot into t_eth2_pubkeys_staging..."
 ch "
     INSERT INTO t_eth2_pubkeys_staging (f_val_idx, f_public_key, f_pool_name, f_pool)
     SELECT
@@ -125,7 +142,7 @@ ch "
         vls.f_public_key,
         iv.f_pool_name,
         iv.f_pool_name AS f_pool
-    FROM postgresql('${PG_HOST}:${PG_PORT}', '${PG_DB}', 't_identified_validators', '${PG_USER}', '${PG_PASS}') AS iv
+    FROM t_labels_snapshot AS iv
     INNER JOIN t_validator_last_status AS vls
         ON concat('0x', iv.f_validator_pubkey) = vls.f_public_key
 " || { echo "$LOG_PREFIX ERROR: import into staging failed, live mapping untouched"; exit 1; }
@@ -190,7 +207,8 @@ post_swap_fail() {
 # ------------------------------------------------- optional t_pubkey_pool mirror
 # Some deployments also serve a pubkey -> pool mirror without requiring a
 # val_idx assignment (labels for deposits still in the pending queue). Same
-# staging + EXCHANGE pattern; the source snapshot already passed the gates.
+# staging + EXCHANGE pattern, built from t_labels_snapshot: the exact same
+# gated read of Postgres the main mapping was built from, never a second one.
 if [ "${SYNC_PUBKEY_POOL:-false}" = "true" ]; then
     echo "$LOG_PREFIX Syncing t_pubkey_pool mirror..."
     ch "CREATE TABLE IF NOT EXISTS t_pubkey_pool_staging AS t_pubkey_pool" || post_swap_fail "t_pubkey_pool staging setup"
@@ -200,8 +218,8 @@ if [ "${SYNC_PUBKEY_POOL:-false}" = "true" ]; then
         SELECT
             concat('0x', iv.f_validator_pubkey) AS f_public_key,
             iv.f_pool_name
-        FROM postgresql('${PG_HOST}:${PG_PORT}', '${PG_DB}', 't_identified_validators', '${PG_USER}', '${PG_PASS}') AS iv
-    " || post_swap_fail "t_pubkey_pool import (live mirror untouched)"
+        FROM t_labels_snapshot AS iv
+    " || post_swap_fail "t_pubkey_pool build (live mirror untouched)"
     PP_COUNT=$(ch "SELECT count() FROM t_pubkey_pool_staging") || post_swap_fail "t_pubkey_pool count"
     if [ "$PP_COUNT" -eq 0 ]; then
         post_swap_fail "t_pubkey_pool gate: snapshot is empty (live mirror untouched)"
@@ -209,6 +227,8 @@ if [ "${SYNC_PUBKEY_POOL:-false}" = "true" ]; then
     ch "EXCHANGE TABLES t_pubkey_pool AND t_pubkey_pool_staging" || post_swap_fail "t_pubkey_pool swap (live mirror untouched)"
     echo "$LOG_PREFIX t_pubkey_pool updated: $PP_COUNT entries"
 fi
+
+ch "TRUNCATE TABLE t_labels_snapshot" || true
 
 # ------------------------------------------------- version stamp
 VERSION=$(date +%s)
