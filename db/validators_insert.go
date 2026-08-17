@@ -3,6 +3,9 @@ package db
 import "github.com/pkg/errors"
 
 const (
+	// Rows with a declared dimension assert f_operator or f_custodian only
+	// (see migration 000013 and ApplyDimensionColumns); they must not touch
+	// the legacy f_pool_name label.
 	applyValidatorsInsertQuery = `
 	INSERT INTO t_identified_validators (
 		f_validator_pubkey,
@@ -13,6 +16,7 @@ const (
 		f_pool_name
 	FROM
 		t_validators_insert
+	WHERE f_dimension IS NULL
 	ON CONFLICT (f_validator_pubkey) DO UPDATE SET f_pool_name = EXCLUDED.f_pool_name
 	WHERE t_identified_validators.f_pool_name IS DISTINCT FROM EXCLUDED.f_pool_name;
 	`

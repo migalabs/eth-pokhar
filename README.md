@@ -163,13 +163,14 @@ This table stores the validators with the pool/entity that operates them. Uniden
 
 Custody (who controls the withdrawal credentials) and operation (who runs the validator) are two different questions, and `f_pool_name` can only store one answer: when both are known and differ, the [identification priority](#identification-priority) decides which one survives. The dimension columns give each answer its own slot:
 
-- `f_operator`: pure operation label. Sources, strongest first: Lido registry operator name, Rocket Pool registry, depositor mapping (`t_depositors_insert`), coinbase detection as fallback.
-- `f_custodian`: pure custody label. Sources: withdrawal address mapping (`t_withdrawal_address_insert`), coinbase detection as fallback.
+- `f_operator`: pure operation label. Sources, strongest first: declared pin (`t_validators_insert` with `f_dimension = 'operator'`), Lido registry operator name, Rocket Pool registry, depositor mapping (`t_depositors_insert`), coinbase detection as fallback.
+- `f_custodian`: pure custody label. Sources, strongest first: declared pin (`f_dimension = 'custodian'`), withdrawal address mapping (`t_withdrawal_address_insert`), coinbase detection as fallback.
 
 Semantics to keep in mind:
 
 - `NULL` means "no declared signal for this dimension", not "unknown entity".
-- Heuristic labels (`whale_0x...`, `solo_stakers`) and manual pins (`t_validators_insert`) live only in `f_pool_name`: their dimension is undeclared, so they never populate the pure columns.
+- Heuristic labels (`whale_0x...`, `solo_stakers`) and legacy pins (`t_validators_insert` rows with `f_dimension` `NULL`) live only in `f_pool_name`: their dimension is undeclared, so they never populate the pure columns.
+- Declared pins (`f_dimension` set to `operator` or `custodian`) are the opposite: they populate only their pure column and never touch `f_pool_name`. Use them for curated per-pubkey facts the address-level mappings cannot express, e.g. a third party operating validators deposited by a liquid-restaking platform.
 - `f_pool_name` keeps its historical behavior and priority chain unchanged: it is the display/legacy label and existing consumers are unaffected.
 - The columns are recomputed at the end of every identify run, deterministically from the mapping tables, so incremental runs and full rebuilds converge to the same values.
 
@@ -187,7 +188,14 @@ This table has the columns `f_depositor` and `f_pool_name`. The `identify` comma
 
 ### `t_validators_insert`
 
-This table has the columns `f_validator_pubkey` and `f_pool_name`. The `identify` command will use this table to identify the pool in which the validators are participating. The `f_validator_pubkey` column is the address of the validator and the `f_pool_name` is the name of the pool in which the validators are participating. These values will be used to tag the validators and will override any other tag that the validator might have been given.
+This table has the columns `f_validator_pubkey`, `f_pool_name` and `f_dimension`. The `identify` command will use this table to identify the pool in which the validators are participating. The `f_validator_pubkey` column is the address of the validator and the `f_pool_name` is the name of the pool in which the validators are participating.
+
+The `f_dimension` column selects what the row asserts:
+
+- `NULL` (default): legacy pin. The value is written to `f_pool_name` and overrides any other tag the validator might have been given.
+- `'operator'` or `'custodian'`: declared pin. The value is written only to the corresponding pure dimension column (see [Dual tagging](#dual-tagging-custodian--operator)) and `f_pool_name` is left untouched.
+
+One row per pubkey: a validator cannot carry a legacy pin and a declared pin at the same time.
 
 ### `t_withdrawal_address_insert`
 
