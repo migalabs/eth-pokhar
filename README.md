@@ -170,7 +170,8 @@ Semantics to keep in mind:
 
 - `NULL` means "no declared signal for this dimension", not "unknown entity".
 - Heuristic labels (`whale_0x...`, `solo_stakers`) and legacy pins (`t_validators_insert` rows with `f_dimension` `NULL`) live only in `f_pool_name`: their dimension is undeclared, so they never populate the pure columns.
-- Declared pins (`f_dimension` set to `operator` or `custodian`) are the opposite: they populate only their pure column and never touch `f_pool_name`. Use them for curated per-pubkey facts the address-level mappings cannot express, e.g. a third party operating validators deposited by a liquid-restaking platform.
+- Operator pins (`f_dimension = 'operator'`) populate `f_operator` and also claim the display label, because entities are the operator when known (the same reason Lido validators show their operator instead of `lido`). Use them for curated per-pubkey facts the address-level mappings cannot express, e.g. a third party operating validators deposited by a liquid-restaking platform.
+- Custodian pins (`f_dimension = 'custodian'`) populate only `f_custodian` and never touch `f_pool_name`.
 - `f_pool_name` keeps its historical behavior and priority chain unchanged: it is the display/legacy label and existing consumers are unaffected.
 - The columns are recomputed at the end of every identify run, deterministically from the mapping tables, so incremental runs and full rebuilds converge to the same values.
 
@@ -193,7 +194,8 @@ This table has the columns `f_validator_pubkey`, `f_pool_name` and `f_dimension`
 The `f_dimension` column selects what the row asserts:
 
 - `NULL` (default): legacy pin. The value is written to `f_pool_name` and overrides any other tag the validator might have been given.
-- `'operator'` or `'custodian'`: declared pin. The value is written only to the corresponding pure dimension column (see [Dual tagging](#dual-tagging-custodian--operator)) and `f_pool_name` is left untouched.
+- `'operator'`: the value is written to `f_operator` (see [Dual tagging](#dual-tagging-custodian--operator)) and to `f_pool_name`, overriding any other tag.
+- `'custodian'`: the value is written only to `f_custodian`; `f_pool_name` is left untouched.
 
 One row per pubkey: a validator cannot carry a legacy pin and a declared pin at the same time.
 

@@ -9,7 +9,9 @@
 -- asserts:
 --
 --   NULL          legacy pin: writes f_pool_name, never the pure columns.
---   'operator'    writes f_operator only; f_pool_name is left untouched.
+--   'operator'    writes f_operator and also the display label: entities are
+--                 the operator when known (Lido validators show kiln, figment
+--                 and so on, not "lido"), so an operator pin claims both.
 --   'custodian'   writes f_custodian only; f_pool_name is left untouched.
 --
 -- Declared rows are the strongest evidence within their dimension: they are
@@ -27,4 +29,4 @@ ALTER TABLE t_validators_insert
     CHECK (f_dimension IS NULL OR f_dimension IN ('operator', 'custodian'));
 
 COMMENT ON COLUMN t_validators_insert.f_dimension IS
-    'Dimension this pin asserts: NULL = legacy f_pool_name pin, operator = f_operator only, custodian = f_custodian only. See migration 000013.';
+    'Dimension this pin asserts: NULL = legacy f_pool_name pin, operator = f_operator plus the display label, custodian = f_custodian only. See migration 000013.';
