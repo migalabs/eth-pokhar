@@ -42,32 +42,34 @@ const (
 		    f_custodian = src.cust
 		FROM (
 			SELECT
-				v.f_validator_pubkey,
+				cur.f_validator_pubkey,
 				COALESCE(
 					pinop.f_pool_name,
 					l.f_operator,
 					CASE WHEN r.f_validator_pubkey IS NOT NULL THEN 'rocketpool' END,
 					md.f_pool_name,
-					CASE WHEN cur.f_pool_name = 'coinbase' THEN 'coinbase' END
+					CASE WHEN cb.f_validator_pubkey IS NOT NULL THEN 'coinbase' END
 				) AS op,
 				COALESCE(
 					pincust.f_pool_name,
 					mw.f_pool_name,
-					CASE WHEN cur.f_pool_name = 'coinbase' THEN 'coinbase' END
+					CASE WHEN cb.f_validator_pubkey IS NOT NULL THEN 'coinbase' END
 				) AS cust
-			FROM t_validator_last_deposit v
-			JOIN t_identified_validators cur
-				ON cur.f_validator_pubkey = v.f_validator_pubkey
+			FROM t_identified_validators cur
+			LEFT JOIN t_validator_last_deposit v
+				ON v.f_validator_pubkey = cur.f_validator_pubkey
+			LEFT JOIN t_coinbase_detected cb
+				ON cb.f_validator_pubkey = cur.f_validator_pubkey
 			LEFT JOIN t_validators_insert pinop
-				ON pinop.f_validator_pubkey = v.f_validator_pubkey
+				ON pinop.f_validator_pubkey = cur.f_validator_pubkey
 				AND pinop.f_dimension = 'operator'
 			LEFT JOIN t_validators_insert pincust
-				ON pincust.f_validator_pubkey = v.f_validator_pubkey
+				ON pincust.f_validator_pubkey = cur.f_validator_pubkey
 				AND pincust.f_dimension = 'custodian'
 			LEFT JOIN t_lido l
-				ON l.f_validator_pubkey = v.f_validator_pubkey
+				ON l.f_validator_pubkey = cur.f_validator_pubkey
 			LEFT JOIN t_rocketpool r
-				ON r.f_validator_pubkey = v.f_validator_pubkey
+				ON r.f_validator_pubkey = cur.f_validator_pubkey
 			LEFT JOIN t_depositors_insert md
 				ON md.f_depositor = v.f_depositor
 			LEFT JOIN t_withdrawal_address_insert mw
