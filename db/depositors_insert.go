@@ -29,8 +29,11 @@ const (
 				WHERE r.f_validator_pubkey = v.f_validator_pubkey)
 			AND NOT EXISTS (SELECT 1 FROM t_lido l
 				WHERE l.f_validator_pubkey = v.f_validator_pubkey)
+			-- Custodian pins (migration 000013) never write f_pool_name, so
+			-- only pins that claim the display label suppress this phase.
 			AND NOT EXISTS (SELECT 1 FROM t_validators_insert vi
-				WHERE vi.f_validator_pubkey = v.f_validator_pubkey)
+				WHERE vi.f_validator_pubkey = v.f_validator_pubkey
+				AND vi.f_dimension IS DISTINCT FROM 'custodian')
 		ON CONFLICT (f_validator_pubkey) DO UPDATE SET
 			f_pool_name = EXCLUDED.f_pool_name
 		WHERE t_identified_validators.f_pool_name IS DISTINCT FROM EXCLUDED.f_pool_name;

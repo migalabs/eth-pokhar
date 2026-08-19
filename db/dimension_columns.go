@@ -12,17 +12,26 @@ const (
 	// the legacy f_pool_name does and what these columns exist to avoid).
 	// Within each dimension, stronger evidence wins:
 	//
-	//   f_operator:  Lido registry > Rocket Pool registry > depositor mapping
-	//                > coinbase detection (fallback: detected validators are
-	//                operated by the exchange unless a better signal exists;
-	//                the depositor mapping beats it because e.g. blockdaemon
-	//                operates validators whose custody is coinbase's).
-	//   f_custodian: withdrawal address mapping > coinbase detection (same
-	//                fallback reasoning on the custody side).
+	//   f_operator:  declared pin (f_dimension = 'operator') > Lido registry
+	//                > Rocket Pool registry > depositor mapping > coinbase
+	//                detection (fallback: detected validators are operated by
+	//                the exchange unless a better signal exists; the depositor
+	//                mapping beats it because e.g. blockdaemon operates
+	//                validators whose custody is coinbase's).
+	//   f_custodian: declared pin (f_dimension = 'custodian') > withdrawal
+	//                address mapping > coinbase detection (same fallback
+	//                reasoning on the custody side).
 	//
-	// Heuristic labels (whales, solo_stakers) and manual pins only exist in
-	// f_pool_name: their dimension is undeclared, so they never feed the pure
-	// columns. NULL here means "no declared signal", not "unknown entity".
+	// Declared pins (migration 000013) are curated per-pubkey facts, so they
+	// rank first in their dimension and double as the manual override; the
+	// depositor mapping in particular mislabels delegated operation (the
+	// depositor of e.g. a liquid-restaking validator is the platform, not
+	// whoever runs it), which is exactly what an operator pin corrects.
+	//
+	// Heuristic labels (whales, solo_stakers) and legacy pins (f_dimension
+	// IS NULL) only exist in f_pool_name: their dimension is undeclared, so
+	// they never feed the pure columns. NULL here means "no declared signal",
+	// not "unknown entity".
 	//
 	// The change guard keeps steady-state runs down to the real daily delta;
 	// the first run after the migration rewrites every row once (write volume
@@ -33,24 +42,34 @@ const (
 		    f_custodian = src.cust
 		FROM (
 			SELECT
-				v.f_validator_pubkey,
+				cur.f_validator_pubkey,
 				COALESCE(
+					pinop.f_pool_name,
 					l.f_operator,
 					CASE WHEN r.f_validator_pubkey IS NOT NULL THEN 'rocketpool' END,
 					md.f_pool_name,
-					CASE WHEN cur.f_pool_name = 'coinbase' THEN 'coinbase' END
+					CASE WHEN cb.f_validator_pubkey IS NOT NULL THEN 'coinbase' END
 				) AS op,
 				COALESCE(
+					pincust.f_pool_name,
 					mw.f_pool_name,
-					CASE WHEN cur.f_pool_name = 'coinbase' THEN 'coinbase' END
+					CASE WHEN cb.f_validator_pubkey IS NOT NULL THEN 'coinbase' END
 				) AS cust
-			FROM t_validator_last_deposit v
-			JOIN t_identified_validators cur
-				ON cur.f_validator_pubkey = v.f_validator_pubkey
+			FROM t_identified_validators cur
+			LEFT JOIN t_validator_last_deposit v
+				ON v.f_validator_pubkey = cur.f_validator_pubkey
+			LEFT JOIN t_coinbase_detected cb
+				ON cb.f_validator_pubkey = cur.f_validator_pubkey
+			LEFT JOIN t_validators_insert pinop
+				ON pinop.f_validator_pubkey = cur.f_validator_pubkey
+				AND pinop.f_dimension = 'operator'
+			LEFT JOIN t_validators_insert pincust
+				ON pincust.f_validator_pubkey = cur.f_validator_pubkey
+				AND pincust.f_dimension = 'custodian'
 			LEFT JOIN t_lido l
-				ON l.f_validator_pubkey = v.f_validator_pubkey
+				ON l.f_validator_pubkey = cur.f_validator_pubkey
 			LEFT JOIN t_rocketpool r
-				ON r.f_validator_pubkey = v.f_validator_pubkey
+				ON r.f_validator_pubkey = cur.f_validator_pubkey
 			LEFT JOIN t_depositors_insert md
 				ON md.f_depositor = v.f_depositor
 			LEFT JOIN t_withdrawal_address_insert mw
