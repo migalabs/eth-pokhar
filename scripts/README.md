@@ -69,7 +69,7 @@ Mind the bind address: the import runs inside the ClickHouse **server**, so the 
 
 It costs nothing: the rollback copy staging is meant to hold is the one the swap itself puts there, not the one from the run before, which was being truncated at that same point anyway.
 
-If a destination is ever left with the old schema live after a migration, rerunning the sync repairs it.
+A destination that an older version of this script already left with the stale schema live is repaired on the next run rather than finished off: before anything is dropped, the two tables are compared, and if staging carries columns the live table lacks, one `EXCHANGE TABLES` puts the migrated schema back before the rebuild starts. Dropping first would have deleted the only surviving copy of it. While the run is in flight the live table serves the previous mapping, which is complete and at most one run old.
 
 ### Credentials handling
 

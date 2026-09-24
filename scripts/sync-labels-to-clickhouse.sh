@@ -118,6 +118,48 @@ ch() {
 
 echo "$LOG_PREFIX $(date -u +%FT%TZ) Starting labels sync..."
 
+# ---------------------------------------------------------------- schema repair
+# A version of this script that reused the staging table could swap a stale
+# schema into t_eth2_pubkeys, leaving the columns a migration had added alive
+# only in t_eth2_pubkeys_staging. Recreating staging unconditionally would
+# then delete that last copy and make the loss permanent, so the two tables
+# are reconciled before anything is dropped: if staging carries columns the
+# live table lacks, the previous run swapped the wrong way round and one more
+# EXCHANGE puts it back.
+#
+# The live table serves the previous mapping between this swap and the one at
+# the end of the run. That mapping is complete and at most one run old, which
+# is the point of doing this rather than dropping the only copy of the schema.
+LIVE_COLS=$(ch "
+    SELECT count()
+    FROM system.columns
+    WHERE database = currentDatabase() AND table = 't_eth2_pubkeys'
+") || exit 1
+if [ "$LIVE_COLS" -eq 0 ]; then
+    echo "$LOG_PREFIX ERROR: ${CH_DB}.t_eth2_pubkeys does not exist. Nothing was written."
+    exit 1
+fi
+
+ORPHAN_COLS=$(ch "
+    SELECT arrayStringConcat(arraySort(groupArray(name)), ', ')
+    FROM (
+        SELECT name FROM system.columns
+        WHERE database = currentDatabase() AND table = 't_eth2_pubkeys_staging'
+        EXCEPT
+        SELECT name FROM system.columns
+        WHERE database = currentDatabase() AND table = 't_eth2_pubkeys'
+    )
+") || exit 1
+
+if [ -n "$ORPHAN_COLS" ]; then
+    echo "$LOG_PREFIX WARNING: t_eth2_pubkeys_staging holds columns the live table lacks ($ORPHAN_COLS)."
+    echo "$LOG_PREFIX A previous run swapped a stale schema into place; restoring it with one EXCHANGE TABLES before rebuilding."
+    ch "EXCHANGE TABLES t_eth2_pubkeys AND t_eth2_pubkeys_staging" || {
+        echo "$LOG_PREFIX ERROR: schema repair swap failed, nothing was dropped"
+        exit 1
+    }
+fi
+
 # ---------------------------------------------------------------- dimensions mode
 # f_operator and f_custodian exist only in destinations that ran goteth
 # migration 000041, and deployments are not upgraded in lockstep. Refusing to
