@@ -123,9 +123,15 @@ echo "$LOG_PREFIX $(date -u +%FT%TZ) Starting labels sync..."
 # schema into t_eth2_pubkeys, leaving the columns a migration had added alive
 # only in t_eth2_pubkeys_staging. Recreating staging unconditionally would
 # then delete that last copy and make the loss permanent, so the two tables
-# are reconciled before anything is dropped: if staging carries columns the
-# live table lacks, the previous run swapped the wrong way round and one more
-# EXCHANGE puts it back.
+# are reconciled before anything is dropped: if staging carries the dimension
+# columns and the live table does not, the previous run swapped the wrong way
+# round and one more EXCHANGE puts it back.
+#
+# Scoped to the two columns this script owns on purpose. "Staging has a column
+# the live table lacks" is also what a deliberate goteth migration looks like
+# from here: a rename leaves the old name behind in staging, a drop leaves the
+# dropped column. Restoring either would revert that migration, so anything
+# beyond the dimensions is reported and left alone.
 #
 # The live table serves the previous mapping between this swap and the one at
 # the end of the run. That mapping is complete and at most one run old, which
@@ -151,8 +157,25 @@ ORPHAN_COLS=$(ch "
     )
 ") || exit 1
 
-if [ -n "$ORPHAN_COLS" ]; then
-    echo "$LOG_PREFIX WARNING: t_eth2_pubkeys_staging holds columns the live table lacks ($ORPHAN_COLS)."
+# Same column list as the dimensions check below; keep the two in step.
+FOREIGN_ORPHANS=$(ch "
+    SELECT arrayStringConcat(arraySort(groupArray(name)), ', ')
+    FROM (
+        SELECT name FROM system.columns
+        WHERE database = currentDatabase()
+          AND table = 't_eth2_pubkeys_staging'
+          AND name NOT IN ('f_operator', 'f_custodian')
+        EXCEPT
+        SELECT name FROM system.columns
+        WHERE database = currentDatabase() AND table = 't_eth2_pubkeys'
+    )
+") || exit 1
+
+if [ -n "$FOREIGN_ORPHANS" ]; then
+    echo "$LOG_PREFIX WARNING: t_eth2_pubkeys_staging has columns the live table lacks ($ORPHAN_COLS), of which this script owns none ($FOREIGN_ORPHANS)."
+    echo "$LOG_PREFIX Leaving the live schema alone: a column renamed or dropped on t_eth2_pubkeys looks exactly like this from here, and restoring it would revert that migration."
+elif [ -n "$ORPHAN_COLS" ]; then
+    echo "$LOG_PREFIX WARNING: the live table is missing the dimension columns ($ORPHAN_COLS) while t_eth2_pubkeys_staging still has them."
     echo "$LOG_PREFIX A previous run swapped a stale schema into place; restoring it with one EXCHANGE TABLES before rebuilding."
     ch "EXCHANGE TABLES t_eth2_pubkeys AND t_eth2_pubkeys_staging" || {
         echo "$LOG_PREFIX ERROR: schema repair swap failed, nothing was dropped"
