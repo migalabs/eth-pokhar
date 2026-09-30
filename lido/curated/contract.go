@@ -11,6 +11,16 @@ import (
 
 const NODE_OPS_ADDRESS = "0x55032650b14df07b85bF18A3a3eC8E0Af2e028d5"
 
+// definedOperatorsNames pins the tag of every Curated operator by registry
+// index, because the on-chain name is a free-form string the operator set
+// itself and is not stable enough to build a URL with. GetOperatorName only
+// falls back to lido.FormatOperatorName past the end of this list.
+//
+// The consequence, and it has already bitten: an operator that renames itself
+// on chain keeps the tag written here until someone edits it by hand. The
+// name is fetched on every run and then dropped on the floor for these
+// indices, so the drift is invisible. Check the entry against
+// getNodeOperator(index, true) before trusting it.
 var definedOperatorsNames = []string{
 	// Wave 0
 	"stakingfacilities_lido", // 0
@@ -39,8 +49,16 @@ var definedOperatorsNames = []string{
 	"hashquark_lido",       // 20
 	"consensyscodefi_lido", // 21
 	// Wave 4
-	"rocklogicgmbh_lido",    // 22
-	"cryptomanufaktur_lido", // 23
+	"rocklogicgmbh_lido", // 22
+	// Galaxy Digital acquired substantially all assets of CryptoManufaktur
+	// LLC, including its engineering team, on 2024-07-19. The registry was
+	// updated to match: getNodeOperator(23, true) returns "Galaxy" today.
+	// This entry was simply never updated with it, and the list wins over
+	// the chain, so the stale tag survived. Custody is unaffected either
+	// way: the withdrawal credentials stay with the Lido vault, which is
+	// what the "_lido" suffix records.
+	// https://www.galaxy.com/newsroom/galaxy-expands-blockchain-infrastructure-capabilities-asset-acquisition-crypto-manufaktur
+	"galaxy_lido",           // 23 (registered as CryptoManufaktur)
 	"kukisglobal_lido",      // 24
 	"nethermind_lido",       // 25
 	"chainsafe_lido",        // 26
