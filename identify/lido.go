@@ -359,6 +359,10 @@ func (i *Identify) processCuratedOperatorKeys(operatorIndex int64, keyCounts map
 	}
 
 	operatorName := curated.GetOperatorName(operator)
+	if drift := curated.PinnedTagDrift(operator); drift != "" {
+		log.Warnf("Curated operator %d is published as %q but the registry now calls it %q (tag would be %q): confirm the override or update definedOperatorsNames",
+			operator.Index, operatorName, operator.Name, drift)
+	}
 	totalKeys := operator.TotalSigningKeys
 
 	action, offset := i.lidoOperatorAction(db.LidoProtocolCurated, operator.Index, totalKeys, keyCounts, stats)
