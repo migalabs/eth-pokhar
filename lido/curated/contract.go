@@ -16,6 +16,11 @@ const NODE_OPS_ADDRESS = "0x55032650b14df07b85bF18A3a3eC8E0Af2e028d5"
 // itself and is not stable enough to build a URL with. GetOperatorName only
 // falls back to lido.FormatOperatorName past the end of this list.
 //
+// Last reconciled against mainnet on 2026-10-02 by reading
+// getNodeOperator(id, true) for every id. Entries that differ from the
+// registry on purpose are the ones whose registry name carries a legal
+// suffix or a character that has no business in a URL.
+//
 // The consequence, and it has already bitten: an operator that renames itself
 // on chain keeps the tag written here until someone edits it by hand. The
 // name is fetched on every run and then dropped on the floor for these
@@ -24,7 +29,7 @@ const NODE_OPS_ADDRESS = "0x55032650b14df07b85bF18A3a3eC8E0Af2e028d5"
 var definedOperatorsNames = []string{
 	// Wave 0
 	"stakingfacilities_lido", // 0
-	"certusone_lido",         // 1
+	"jumpcrypto_lido",        // 1 (registry: Jump Crypto)
 	"p2porg_lido",            // 2
 	"chorusone_lido",         // 3
 	"stakefish_lido",         // 4
@@ -39,15 +44,15 @@ var definedOperatorsNames = []string{
 	"allnodes_lido",          // 11
 	"anyblockanalytics_lido", // 12
 	// Wave 3
-	"blockdaemon_lido",     // 13
-	"stakin_lido",          // 14
-	"chainlayer_lido",      // 15
-	"simplystaking_lido",   // 16
-	"bridgetower_lido",     // 17
-	"stakely_lido",         // 18
-	"infstones_lido",       // 19
-	"hashquark_lido",       // 20
-	"consensyscodefi_lido", // 21
+	"blockdaemon_lido",   // 13
+	"stakin_lido",        // 14
+	"chainlayer_lido",    // 15
+	"simplystaking_lido", // 16
+	"solstice_lido",      // 17 (registry: Solstice)
+	"stakely_lido",       // 18
+	"infstones_lido",     // 19
+	"hashkeycloud_lido",  // 20 (registry: HashKey Cloud)
+	"consensys_lido",     // 21 (registry: Consensys)
 	// Wave 4
 	"rocklogicgmbh_lido", // 22
 	// Galaxy Digital acquired substantially all assets of CryptoManufaktur
@@ -60,7 +65,7 @@ var definedOperatorsNames = []string{
 	// https://www.galaxy.com/newsroom/galaxy-expands-blockchain-infrastructure-capabilities-asset-acquisition-crypto-manufaktur
 	"galaxy_lido",           // 23 (registered as CryptoManufaktur)
 	"kukisglobal_lido",      // 24
-	"nethermind_lido",       // 25
+	"twinstake_lido",        // 25 (registry: Twinstake)
 	"chainsafe_lido",        // 26
 	"prysmaticlabs_lido",    // 27
 	"sigmaprime_lido",       // 28
@@ -72,7 +77,7 @@ var definedOperatorsNames = []string{
 	"develpgmbh_lido",   // 33
 	"ebunker_lido",      // 34
 	"gateway.fmas_lido", // 35
-	"numic_lido",        // 36
+	"mavan_lido",        // 36 (registry: MAVAN)
 	"parafi_lido",       // 37
 	"rockawayx_lido",    // 38
 }
