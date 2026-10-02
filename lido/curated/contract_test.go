@@ -49,3 +49,42 @@ func TestDefinedOperatorNamesAreUnique(t *testing.T) {
 		seen[name] = i
 	}
 }
+
+func TestPinnedTagDrift(t *testing.T) {
+	tests := []struct {
+		name     string
+		operator NodeOperator
+		want     string
+	}{
+		{
+			name:     "silent when the registry agrees with the pinned tag",
+			operator: NodeOperator{Index: 0, Name: "Staking Facilities"},
+			want:     "",
+		},
+		{
+			name:     "silent when the operator is not pinned at all",
+			operator: NodeOperator{Index: uint64(len(definedOperatorsNames)), Name: "Anything"},
+			want:     "",
+		},
+		{
+			name:     "reports the tag a renamed operator would get",
+			operator: NodeOperator{Index: 0, Name: "Renamed Co"},
+			want:     "renamedco_lido",
+		},
+		{
+			// The case this exists for: index 23 kept reporting
+			// CryptoManufaktur long after the registry said Galaxy.
+			name:     "would have caught the CryptoManufaktur drift",
+			operator: NodeOperator{Index: 23, Name: "CryptoManufaktur"},
+			want:     "cryptomanufaktur_lido",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := PinnedTagDrift(tt.operator); got != tt.want {
+				t.Errorf("PinnedTagDrift(%+v) = %q, want %q", tt.operator, got, tt.want)
+			}
+		})
+	}
+}

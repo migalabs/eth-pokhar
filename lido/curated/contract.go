@@ -158,3 +158,25 @@ func GetOperatorName(operator NodeOperator) string {
 	}
 	return lido.FormatOperatorName(operator.Name)
 }
+
+// PinnedTagDrift returns the tag the registry name would produce when it
+// disagrees with the pinned one, and "" when they agree or the operator is
+// not pinned.
+//
+// Overriding the registry is the point of definedOperatorsNames, so a
+// disagreement is not an error by itself: several registry names carry legal
+// suffixes or characters that have no business in a URL. What it must never
+// be is invisible. The name is read from the chain on every run and then
+// dropped for pinned indices, so an operator that renames itself keeps the
+// old tag until a human happens to notice, which for index 23 took two years.
+// Surfacing the disagreement turns that into one log line per run.
+func PinnedTagDrift(operator NodeOperator) string {
+	if operator.Index >= uint64(len(definedOperatorsNames)) {
+		return ""
+	}
+	fromRegistry := lido.FormatOperatorName(operator.Name)
+	if fromRegistry == definedOperatorsNames[operator.Index] {
+		return ""
+	}
+	return fromRegistry
+}
