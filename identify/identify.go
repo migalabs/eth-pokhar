@@ -204,7 +204,7 @@ func (i *Identify) Run() {
 	if !i.stop {
 		startTime := time.Now()
 		log.Info("Applying dimension columns (operator/custodian)")
-		rows, err := i.dbClient.ApplyDimensionColumns()
+		rows, err := i.dbClient.ApplyDimensionColumns(lidoDimensions())
 		if err != nil {
 			log.Errorf("Error applying dimension columns: %v. Skipping to next step.", err)
 		} else {

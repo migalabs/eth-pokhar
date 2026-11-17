@@ -148,13 +148,15 @@ This table stores the validators that are participating in the Lido pool. See [L
 
 Every Lido staking module registered in the StakingRouter (`0xFdDf38947aFB03C621C71b06C9C70bce73f12999`) is scanned. Each run warns about any module that is not on this list: its validators would otherwise fall back to the StakingRouter depositor label `lido`.
 
-| Module id | Module | `f_protocol` | Operator tag (`f_operator`) | Entity label (`f_pool_name`) |
-|---|---|---|---|---|
-| 1 | Curated | `curated` | `<name>_lido` | same as the operator tag |
-| 2 | Simple DVT | `sdvt` | on-chain name, e.g. `lidoxssv_<cluster>` | same as the operator tag |
-| 3 | Community Staking (CSM) | `csm` | `csm_operator<N>_lido` | same as the operator tag |
-| 4 | Curated Module v2 (CMv2) | `cmv2` | `lido_cmv2_operator<N>` | `lido_cmv2` |
-| 5 | Community Staking 0x02 | `csm0x02` | `lido_csm0x02_operator<N>` | `lido_csm0x02` |
+| Module id | Module | `f_protocol` | `t_lido.f_operator` (registry tag) | Entity label (`f_pool_name`) | `f_custodian` | `f_operator` |
+|---|---|---|---|---|---|---|
+| 1 | Curated | `curated` | `<name>_lido` | same as the registry tag | `lido_cmv1` | canonical company label |
+| 2 | Simple DVT | `sdvt` | on-chain name, e.g. `lidoxssv_<cluster>` | same as the registry tag | `lido_sdvt` | registry tag |
+| 3 | Community Staking (CSM) | `csm` | `csm_operator<N>_lido` | same as the registry tag | `lido_csm` | registry tag |
+| 4 | Curated Module v2 (CMv2) | `cmv2` | `lido_cmv2_operator<N>` | `lido_cmv2` | `lido_cmv2` | canonical label of its curated v1 company |
+| 5 | Community Staking 0x02 | `csm0x02` | `lido_csm0x02_operator<N>` | `lido_csm0x02` | `lido_csm0x02` | registry tag |
+
+In the custody/operator dimensions (see [Dual tagging](#dual-tagging-custodian--operator)) Lido is one custody entity per module, and each module splits into its operators. The operator of a curated v1 or CMv2 key is the company, not its Lido slice (`lido.CuratedCanonicalOperators`): a company that also runs validators outside Lido keeps the label it has there (`figment`, `kiln`, `p2porg`...), so it is one operator across all of its custodians. A CMv2 operator takes the label of the curated v1 operator the CMv2 MetaRegistry groups it with (`lido.CMv2CuratedOperator`); every run warns when that table and the MetaRegistry disagree, or when a new CMv2 operator is missing from it (it keeps `lido_cmv2_operator<N>` until then).
 
 CMv2 and CSM 0x02 are shown as one entity per module ("Lido CMv2" and "Lido CSM0x02" in the dashboard, which maps the tags to those names the same way it groups `csm_operator<N>_lido` into "Lido CSM"). The per-operator tag stays in `f_operator`. Every tag keeps `lido` in the name, since consumers classify pooled stake with `LIKE '%lido%'`. The tags of modules 4 and 5 must not start with `csm`, because CSM metrics select `LIKE 'csm_%'`.
 
@@ -176,8 +178,8 @@ This table stores the validators with the pool/entity that operates them. Uniden
 
 Custody (who controls the withdrawal credentials) and operation (who runs the validator) are two different questions, and `f_pool_name` can only store one answer: when both are known and differ, the [identification priority](#identification-priority) decides which one survives. The dimension columns give each answer its own slot:
 
-- `f_operator`: pure operation label. Sources, strongest first: declared pin (`t_validators_insert` with `f_dimension = 'operator'`), Lido registry operator name, Rocket Pool registry, depositor mapping (`t_depositors_insert`), coinbase detection as fallback.
-- `f_custodian`: pure custody label. Sources, strongest first: declared pin (`f_dimension = 'custodian'`), withdrawal address mapping (`t_withdrawal_address_insert`), coinbase detection as fallback.
+- `f_operator`: pure operation label. Sources, strongest first: declared pin (`t_validators_insert` with `f_dimension = 'operator'`), canonical Lido operator (curated v1 and CMv2, see [`t_lido`](#t_lido)), Lido registry tag, Rocket Pool registry, depositor mapping (`t_depositors_insert`), coinbase detection as fallback.
+- `f_custodian`: pure custody label. Sources, strongest first: declared pin (`f_dimension = 'custodian'`), Lido module (`lido_cmv1`, `lido_sdvt`, `lido_csm`, `lido_cmv2`, `lido_csm0x02`), withdrawal address mapping (`t_withdrawal_address_insert`), coinbase detection as fallback. The Lido module ranks above the address mapping because every module withdraws to the same Lido vault: mapping that address must never collapse the modules into one custodian.
 
 Semantics to keep in mind:
 

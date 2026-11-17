@@ -4,6 +4,7 @@ import (
 	"math/big"
 	"os"
 	"reflect"
+	"strconv"
 	"testing"
 
 	db "github.com/migalabs/eth-pokhar/db"
@@ -72,5 +73,36 @@ func TestCSMFamilyOnMainnet(t *testing.T) {
 			deposited += uint64(operator.Operator.TotalDepositedKeys)
 		}
 		t.Logf("%s (module %d): operators=%d deposited=%d", module.name, module.id, count, deposited)
+	}
+}
+
+func TestLidoDimensions(t *testing.T) {
+	d := lidoDimensions()
+	custody := map[string]string{}
+	for k, protocol := range d.CustodyProtocols {
+		custody[protocol] = d.CustodyTags[k]
+	}
+	wantCustody := map[string]string{
+		db.LidoProtocolCurated: "lido_cmv1", db.LidoProtocolSDVT: "lido_sdvt", db.LidoProtocolCSM: "lido_csm",
+		db.LidoProtocolCMv2: "lido_cmv2", db.LidoProtocolCSM0x02: "lido_csm0x02",
+	}
+	if !reflect.DeepEqual(custody, wantCustody) {
+		t.Errorf("custody: got %v, want %v", custody, wantCustody)
+	}
+
+	operators := map[string]string{}
+	for k, protocol := range d.OperatorProtocols {
+		operators[protocol+"/"+strconv.Itoa(int(d.OperatorIndexes[k]))] = d.OperatorTags[k]
+	}
+	if got, want := len(operators), len(lido.CuratedCanonicalOperators)+len(lido.CMv2CuratedOperator); got != want {
+		t.Errorf("got %d operator entries, want %d", got, want)
+	}
+	for key, want := range map[string]string{
+		"curated/10": "figment", "curated/25": "twinstake",
+		"cmv2/44": "figment", "cmv2/8": "twinstake", "cmv2/3": "rockx", "cmv2/6": "consensys",
+	} {
+		if operators[key] != want {
+			t.Errorf("%s: got %q, want %q", key, operators[key], want)
+		}
 	}
 }
