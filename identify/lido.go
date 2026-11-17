@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,6 +93,75 @@ func lidoEntityTags() (protocols []string, tags []string) {
 	return protocols, tags
 }
 
+// lidoDimensions returns the Lido sources of the f_custodian and f_operator
+// dimensions: the custody entity of every module (Lido is shown as one custody
+// entity per module) and the canonical operator of every curated v1 and CMv2
+// node operator. SDVT clusters and CSM operators keep their registry tag as
+// operator. Static on purpose, so the dimension pass is deterministic and
+// never depends on an RPC answer; warnCMv2OperatorDrift keeps it honest.
+func lidoDimensions() db.LidoDimensions {
+	d := db.LidoDimensions{
+		CustodyProtocols: []string{db.LidoProtocolCurated, db.LidoProtocolSDVT, db.LidoProtocolCSM, db.LidoProtocolCMv2, db.LidoProtocolCSM0x02},
+		CustodyTags:      []string{lido.CuratedCustodyTag, lido.SDVTCustodyTag, lido.CSMCustodyTag, csm.CMv2EntityTag, csm.CSM0x02EntityTag},
+	}
+	for index, operator := range lido.CuratedCanonicalOperators {
+		d.OperatorProtocols = append(d.OperatorProtocols, db.LidoProtocolCurated)
+		d.OperatorIndexes = append(d.OperatorIndexes, int32(index))
+		d.OperatorTags = append(d.OperatorTags, operator)
+	}
+	cmv2Operators := make([]uint64, 0, len(lido.CMv2CuratedOperator))
+	for op := range lido.CMv2CuratedOperator {
+		cmv2Operators = append(cmv2Operators, op)
+	}
+	sort.Slice(cmv2Operators, func(a, b int) bool { return cmv2Operators[a] < cmv2Operators[b] })
+	for _, op := range cmv2Operators {
+		curated := lido.CMv2CuratedOperator[op]
+		if curated >= uint64(len(lido.CuratedCanonicalOperators)) {
+			continue
+		}
+		d.OperatorProtocols = append(d.OperatorProtocols, db.LidoProtocolCMv2)
+		d.OperatorIndexes = append(d.OperatorIndexes, int32(op))
+		d.OperatorTags = append(d.OperatorTags, lido.CuratedCanonicalOperators[curated])
+	}
+	return d
+}
+
+// warnCMv2OperatorDrift compares the static CMv2 -> curated v1 operator links
+// with the MetaRegistry groups and warns about new operators and changed
+// links, which would otherwise leave a company split across two operator
+// labels without anyone noticing. Operators the MetaRegistry puts in no group
+// are expected to be linked by hand (see lido.CMv2CuratedOperator). Best
+// effort: a failed check never blocks the run.
+func (i *Identify) warnCMv2OperatorDrift() {
+	module, err := csm.NewContractAt(i.iConfig.ElEndpoint, csm.CMv2ContractAddress)
+	if err != nil {
+		log.Warnf("Could not check CMv2 operator links: %v", err)
+		return
+	}
+	count, err := module.GetNodeOperatorsCount()
+	if err != nil {
+		log.Warnf("Could not check CMv2 operator links: %v", err)
+		return
+	}
+	onChain, err := lido.CMv2CuratedLinksOnChain(i.iConfig.ElEndpoint, uint64(count))
+	if err != nil {
+		log.Warnf("Could not check CMv2 operator links: %v", err)
+		return
+	}
+	for op := uint64(0); op < uint64(count); op++ {
+		static, known := lido.CMv2CuratedOperator[op]
+		chain, grouped := onChain[op]
+		switch {
+		case !known && grouped:
+			log.Warnf("CMv2 operator %d is not in lido.CMv2CuratedOperator; the MetaRegistry links it to curated operator %d. It keeps the tag lido_cmv2_operator%d until the table is updated", op, chain, op)
+		case !known:
+			log.Warnf("CMv2 operator %d is not in lido.CMv2CuratedOperator and the MetaRegistry links it to no curated operator: it keeps the tag lido_cmv2_operator%d", op, op)
+		case grouped && chain != static:
+			log.Warnf("CMv2 operator %d is linked to curated operator %d in lido.CMv2CuratedOperator but the MetaRegistry says %d: confirm and update the table", op, static, chain)
+		}
+	}
+}
+
 // warnUnscannedStakingModules flags StakingRouter modules pokhar does not read.
 // Their keys never reach t_lido, so their validators fall back to the
 // StakingRouter depositor label "lido" (issue #47); this is the tripwire for
@@ -109,6 +179,7 @@ func (i *Identify) warnUnscannedStakingModules() {
 
 func (i *Identify) IdentifyLidoValidators() error {
 	i.warnUnscannedStakingModules()
+	i.warnCMv2OperatorDrift()
 
 	// One snapshot of stored key counts shared by every module. Operators are
 	// visited once per run, so intra-run staleness is not a concern.
