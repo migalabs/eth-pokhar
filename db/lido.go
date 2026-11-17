@@ -24,20 +24,38 @@ const (
 	ORDER BY os.sequence_number ASC;
 	`
 
+	// The display label is the operator tag, except for protocols listed in
+	// ($1, $2) as (protocol, entity tag) pairs: those modules show as a single
+	// entity and keep the per-operator tag only in t_lido.f_operator, which
+	// feeds the f_operator dimension.
 	identifyLidoValidators = `
-	UPDATE t_identified_validators
-	SET f_pool_name = t_lido.f_operator
-	FROM t_lido
-	WHERE t_identified_validators.f_validator_pubkey = t_lido.f_validator_pubkey
-		AND t_identified_validators.f_pool_name IS DISTINCT FROM t_lido.f_operator;
+	UPDATE t_identified_validators t
+	SET f_pool_name = src.f_pool_name
+	FROM (
+		SELECT l.f_validator_pubkey, COALESCE(m.tag, l.f_operator) AS f_pool_name
+		FROM t_lido l
+		LEFT JOIN unnest($1::text[], $2::text[]) AS m(protocol, tag)
+			ON m.protocol = l.f_protocol
+	) src
+	WHERE t.f_validator_pubkey = src.f_validator_pubkey
+		AND t.f_pool_name IS DISTINCT FROM src.f_pool_name;
 	`
 	LidoProtocolCurated = "curated"
 	LidoProtocolCSM     = "csm"
 	LidoProtocolSDVT    = "sdvt"
+	// Curated Module v2 (StakingRouter module 4).
+	LidoProtocolCMv2 = "cmv2"
+	// Community Staking 0x02 (StakingRouter module 5).
+	LidoProtocolCSM0x02 = "csm0x02"
 )
 
-// IdentifyLidoValidators identifies the lido validators and adds them to the identified validators table
-func (p *PostgresDBService) IdentifyLidoValidators() error {
+// IdentifyLidoValidators labels every validator found in t_lido. entityProtocols
+// and entityTags are parallel: validators of entityProtocols[k] get
+// entityTags[k] as their label, the rest get their operator tag.
+func (p *PostgresDBService) IdentifyLidoValidators(entityProtocols []string, entityTags []string) error {
+	if len(entityProtocols) != len(entityTags) {
+		return errors.Errorf("entity protocols and tags differ in length: %d vs %d", len(entityProtocols), len(entityTags))
+	}
 	p.writerThreadsWG.Add(1)
 	defer p.writerThreadsWG.Done()
 
@@ -47,7 +65,9 @@ func (p *PostgresDBService) IdentifyLidoValidators() error {
 	}
 	defer conn.Release()
 
-	_, err = conn.Query(p.ctx, identifyLidoValidators)
+	// Exec, not Query: the rows of a Query were never closed, so a failing
+	// UPDATE went unreported.
+	_, err = conn.Exec(p.ctx, identifyLidoValidators, entityProtocols, entityTags)
 	if err != nil {
 		return errors.Wrap(err, "error identifying lido validators")
 	}
