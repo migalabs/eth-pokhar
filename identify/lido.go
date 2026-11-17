@@ -2,6 +2,8 @@ package identify
 
 import (
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -48,46 +50,108 @@ func (i *Identify) lidoOperatorAction(protocol string, operatorIndex uint64, onC
 	return "full", 0
 }
 
+// csmFamilyModule is a Lido staking module read through the CSM binding: CSM
+// itself and the modules built on its codebase.
+type csmFamilyModule struct {
+	id           uint64 // StakingRouter module id
+	name         string
+	address      string
+	protocol     string // t_lido.f_protocol
+	operatorName func(csm.NodeOperatorCustom) string
+	// entityTag, when set, is the f_pool_name of every validator of the
+	// module; the per-operator tag still feeds f_operator. Empty means the
+	// per-operator tag is also the entity label.
+	entityTag string
+}
+
+var csmFamilyModules = []csmFamilyModule{
+	{id: 3, name: "CSM", address: csm.CSMContractAddress, protocol: db.LidoProtocolCSM, operatorName: csm.GetOperatorName},
+	{id: 4, name: "CMv2", address: csm.CMv2ContractAddress, protocol: db.LidoProtocolCMv2, operatorName: csm.CMv2OperatorName, entityTag: csm.CMv2EntityTag},
+	{id: 5, name: "CSM 0x02", address: csm.CSM0x02ContractAddress, protocol: db.LidoProtocolCSM0x02, operatorName: csm.CSM0x02OperatorName, entityTag: csm.CSM0x02EntityTag},
+}
+
+// scannedStakingModules maps every StakingRouter module id pokhar reads to its
+// name: curated and SDVT, plus the CSM family.
+func scannedStakingModules() map[uint64]string {
+	scanned := map[uint64]string{1: "curated", 2: "SDVT"}
+	for _, module := range csmFamilyModules {
+		scanned[module.id] = module.name
+	}
+	return scanned
+}
+
+// lidoEntityTags returns, as parallel slices, the protocols whose validators
+// are labelled with a module-wide entity tag and that tag.
+func lidoEntityTags() (protocols []string, tags []string) {
+	for _, module := range csmFamilyModules {
+		if module.entityTag != "" {
+			protocols = append(protocols, module.protocol)
+			tags = append(tags, module.entityTag)
+		}
+	}
+	return protocols, tags
+}
+
+// warnUnscannedStakingModules flags StakingRouter modules pokhar does not read.
+// Their keys never reach t_lido, so their validators fall back to the
+// StakingRouter depositor label "lido" (issue #47); this is the tripwire for
+// the next module Lido adds. Best effort: a failed check never blocks the run.
+func (i *Identify) warnUnscannedStakingModules() {
+	ids, err := lido.GetStakingModuleIds(i.iConfig.ElEndpoint)
+	if err != nil {
+		log.Warnf("Could not list Lido staking modules: %v", err)
+		return
+	}
+	for _, id := range lido.UnscannedModules(ids, scannedStakingModules()) {
+		log.Warnf("Lido StakingRouter has module %d, which pokhar does not scan: its validators fall back to the generic \"lido\" label", id)
+	}
+}
+
 func (i *Identify) IdentifyLidoValidators() error {
-	// One snapshot of stored key counts shared by the three modules. Operators
-	// are visited once per run, so intra-run staleness is not a concern.
+	i.warnUnscannedStakingModules()
+
+	// One snapshot of stored key counts shared by every module. Operators are
+	// visited once per run, so intra-run staleness is not a concern.
 	keyCounts, err := i.dbClient.ObtainLidoOperatorKeyCounts()
 	if err != nil {
 		return err
 	}
 
+	// A module that fails must not cost the others their labels. The keys of
+	// earlier runs stay in t_lido, so the UPDATE below is still correct for a
+	// module that could not be refreshed. Skipping it would be much worse: in
+	// the weekly RECREATE_TABLE run t_identified_validators starts truncated
+	// and the depositor phases leave t_lido keys alone, so every Lido
+	// validator would stay solo_stakers until the next run.
+	var moduleErrs []error
 	log.Debug("Identifying lido curated module validators")
-	err = i.identifyCuratedModule(keyCounts)
-	if err != nil {
-		return err
+	if err := i.identifyCuratedModule(keyCounts); err != nil {
+		moduleErrs = append(moduleErrs, fmt.Errorf("curated: %w", err))
 	}
-	log.Debug("Identified lido curated module validators")
 
 	log.Debug("Identifying lido SDVT module validators")
-	err = i.identifySDVT(keyCounts)
-	if err != nil {
-		return err
+	if err := i.identifySDVT(keyCounts); err != nil {
+		moduleErrs = append(moduleErrs, fmt.Errorf("SDVT: %w", err))
 	}
-	log.Debug("Identified lido SDVT module validators")
 
-	log.Debug("Identifying lido csm validators")
-	err = i.identifyCSM(keyCounts)
-	if err != nil {
-		return err
+	for _, module := range csmFamilyModules {
+		log.Debugf("Identifying lido %s validators", module.name)
+		if err := i.identifyCSMFamily(module, keyCounts); err != nil {
+			moduleErrs = append(moduleErrs, fmt.Errorf("%s: %w", module.name, err))
+		}
 	}
-	log.Debug("Identified lido csm validators")
 
-	// One single pass over t_lido after the three modules updated it: the
-	// UPDATE joins half a million keys against t_identified_validators, so
-	// running it per module tripled the cost for the same final state.
+	// One single pass over t_lido after every module updated it: the UPDATE
+	// joins half a million keys against t_identified_validators, so running it
+	// per module multiplied the cost for the same final state.
 	startTime := time.Now()
-	err = i.dbClient.IdentifyLidoValidators()
-	if err != nil {
-		return err
+	entityProtocols, entityTags := lidoEntityTags()
+	if err := i.dbClient.IdentifyLidoValidators(entityProtocols, entityTags); err != nil {
+		return errors.Join(append(moduleErrs, err)...)
 	}
 	log.Infof("Applied lido pool names in %v", time.Since(startTime))
 
-	return nil
+	return errors.Join(moduleErrs...)
 }
 
 ///// Simple DVT /////
@@ -198,24 +262,23 @@ func (i *Identify) processSDVTOperatorKeys(operatorIndex int64, keyCounts map[st
 	return nil
 }
 
-///// CSM /////
+///// CSM family (CSM, Curated Module v2, CSM 0x02) /////
 
-func (i *Identify) identifyCSM(keyCounts map[string]uint64) error {
-	log.Debug("Creating a new instance of LidoContract")
-	csmContract, err := csm.NewCSMContract(i.iConfig.ElEndpoint)
-	// Check if there was an error
+// identifyCSMFamily reconciles the deposited keys of every operator of a module
+// that shares the CSM interface.
+func (i *Identify) identifyCSMFamily(module csmFamilyModule, keyCounts map[string]uint64) error {
+	log.Debugf("Creating a new instance of the %s contract", module.name)
+	moduleContract, err := csm.NewContractAt(i.iConfig.ElEndpoint, module.address)
 	if err != nil {
 		return err
 	}
 
-	log.Debug("Calling the GetOperatorsIndexes function")
-	operatorsCount, err := csmContract.GetNodeOperatorsCount()
+	operatorsCount, err := moduleContract.GetNodeOperatorsCount()
 	if err != nil {
 		return err
 	}
-	log.Debugf("Found %v operators", operatorsCount)
+	log.Debugf("Found %v %s operators", operatorsCount, module.name)
 
-	log.Debug("Getting keys for each operator")
 	stats := &lidoModuleStats{}
 	workerSemaphore := make(chan struct{}, 10)
 	var wg sync.WaitGroup
@@ -229,70 +292,79 @@ func (i *Identify) identifyCSM(keyCounts map[string]uint64) error {
 
 		go func(operatorIndex int64) {
 			defer wg.Done()
-			if err := i.processCSMOperatorKeys(operatorIndex, keyCounts, stats); err != nil {
-				log.Errorf("Error reconciling CSM operator %v: %v", operatorIndex, err)
+			if err := i.processCSMFamilyOperatorKeys(module, operatorIndex, keyCounts, stats); err != nil {
+				log.Errorf("Error reconciling %s operator %v: %v", module.name, operatorIndex, err)
 			}
 			<-workerSemaphore
 		}(operatorIndex)
 	}
-	log.Debug("Finished getting keys for each operator")
 
 	wg.Wait()
 	if i.stop {
 		return nil
 	}
-	log.Infof("CSM module: operators=%d skipped=%d incremental=%d full=%d",
-		operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
+	log.Infof("%s module: operators=%d skipped=%d incremental=%d full=%d",
+		module.name, operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
 
 	return nil
 }
 
-func (i *Identify) processCSMOperatorKeys(operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
-	csmContract, err := csm.NewCSMContract(i.iConfig.ElEndpoint)
+func (i *Identify) processCSMFamilyOperatorKeys(module csmFamilyModule, operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
+	moduleContract, err := csm.NewContractAt(i.iConfig.ElEndpoint, module.address)
 	if err != nil {
 		return err
 	}
 
-	operator, err := csmContract.GetOperatorData(big.NewInt(operatorIndex))
+	operator, err := moduleContract.GetOperatorData(big.NewInt(operatorIndex))
 	if err != nil {
 		return err
 	}
 
-	operatorName := csm.GetOperatorName(operator)
+	operatorName := module.operatorName(operator)
 	totalKeys := uint64(operator.Operator.TotalDepositedKeys)
 
-	action, offset := i.lidoOperatorAction(db.LidoProtocolCSM, operator.Index, totalKeys, keyCounts, stats)
+	action, offset := i.lidoOperatorAction(module.protocol, operator.Index, totalKeys, keyCounts, stats)
 	if action == "skip" {
-		log.Debugf("CSM operator %v: up to date (on-chain=%d)", operatorName, totalKeys)
+		log.Debugf("%s operator %v: up to date (on-chain=%d)", module.name, operatorName, totalKeys)
 		return nil
 	}
-	log.Infof("Reconciling keys for CSM operator %v (action=%s on-chain total=%v)", operatorName, action, totalKeys)
+	log.Infof("Reconciling keys for %s operator %v (action=%s on-chain total=%v)", module.name, operatorName, action, totalKeys)
 
+	// Batched like the curated path: CMv2 operators absorb whole curated
+	// fleets through consolidations, so one call per operator would not scale.
 	keysString := make([]string, 0, totalKeys-offset)
-	if totalKeys > offset {
-		keys, err := csmContract.GetOperatorKeys(operator, offset, totalKeys-offset)
+	for offset < totalKeys {
+		if i.stop {
+			return nil
+		}
+		limit := totalKeys - offset
+		if limit > maxBatchSize {
+			limit = maxBatchSize
+		}
+		keys, err := moduleContract.GetOperatorKeys(operator, offset, limit)
 		if err != nil {
 			return err
 		}
 		for _, key := range keys {
 			keysString = append(keysString, hex.EncodeToString(key))
 		}
+		offset += limit
 	}
 
 	if action == "incremental" {
-		upserted, err := i.dbClient.AppendLidoOperatorValidators(operatorName, operator.Index, keysString, db.LidoProtocolCSM)
+		upserted, err := i.dbClient.AppendLidoOperatorValidators(operatorName, operator.Index, keysString, module.protocol)
 		if err != nil {
 			return err
 		}
-		log.Infof("CSM operator %v appended: on-chain=%d new=%d", operatorName, totalKeys, upserted)
+		log.Infof("%s operator %v appended: on-chain=%d new=%d", module.name, operatorName, totalKeys, upserted)
 		return nil
 	}
 
-	upserted, removed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, keysString, db.LidoProtocolCSM)
+	upserted, removed, err := i.dbClient.ReconcileLidoOperatorValidators(operatorName, operator.Index, keysString, module.protocol)
 	if err != nil {
 		return err
 	}
-	log.Infof("CSM operator %v reconciled: on-chain=%d upserted=%d removed=%d", operatorName, totalKeys, upserted, removed)
+	log.Infof("%s operator %v reconciled: on-chain=%d upserted=%d removed=%d", module.name, operatorName, totalKeys, upserted, removed)
 	return nil
 }
 

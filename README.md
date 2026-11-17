@@ -143,7 +143,20 @@ This table stores the validators that are participating in the Lido pool. See [L
 
 - `f_validator_pubkey`: The public key of the validator.
 - `f_operator`: The name of the operator of the validator.
-- `f_operator_index`: The index of the operator in the Lido pool.
+- `f_operator_index`: The index of the operator in its staking module.
+- `f_protocol`: The staking module the key belongs to (see below).
+
+Every Lido staking module registered in the StakingRouter (`0xFdDf38947aFB03C621C71b06C9C70bce73f12999`) is scanned. Each run warns about any module that is not on this list: its validators would otherwise fall back to the StakingRouter depositor label `lido`.
+
+| Module id | Module | `f_protocol` | Operator tag (`f_operator`) | Entity label (`f_pool_name`) |
+|---|---|---|---|---|
+| 1 | Curated | `curated` | `<name>_lido` | same as the operator tag |
+| 2 | Simple DVT | `sdvt` | on-chain name, e.g. `lidoxssv_<cluster>` | same as the operator tag |
+| 3 | Community Staking (CSM) | `csm` | `csm_operator<N>_lido` | same as the operator tag |
+| 4 | Curated Module v2 (CMv2) | `cmv2` | `lido_cmv2_operator<N>` | `lido_cmv2` |
+| 5 | Community Staking 0x02 | `csm0x02` | `lido_csm0x02_operator<N>` | `lido_csm0x02` |
+
+CMv2 and CSM 0x02 are shown as one entity per module ("Lido CMv2" and "Lido CSM0x02" in the dashboard, which maps the tags to those names the same way it groups `csm_operator<N>_lido` into "Lido CSM"). The per-operator tag stays in `f_operator`. Every tag keeps `lido` in the name, since consumers classify pooled stake with `LIKE '%lido%'`. The tags of modules 4 and 5 must not start with `csm`, because CSM metrics select `LIKE 'csm_%'`.
 
 ### `t_rocketpool`
 
@@ -170,7 +183,7 @@ Semantics to keep in mind:
 
 - `NULL` means "no declared signal for this dimension", not "unknown entity".
 - Heuristic labels (`whale_0x...`, `solo_stakers`) and legacy pins (`t_validators_insert` rows with `f_dimension` `NULL`) live only in `f_pool_name`: their dimension is undeclared, so they never populate the pure columns.
-- Operator pins (`f_dimension = 'operator'`) populate `f_operator` and also claim the display label, because entities are the operator when known (the same reason Lido validators show their operator instead of `lido`). Use them for curated per-pubkey facts the address-level mappings cannot express, e.g. a third party operating validators deposited by a liquid-restaking platform.
+- Operator pins (`f_dimension = 'operator'`) populate `f_operator` and also claim the display label, because entities are the operator when known (the same reason Lido validators show their operator instead of `lido`, except CMv2 and CSM 0x02, which show their module, see [`t_lido`](#t_lido)). Use them for curated per-pubkey facts the address-level mappings cannot express, e.g. a third party operating validators deposited by a liquid-restaking platform.
 - Custodian pins (`f_dimension = 'custodian'`) populate only `f_custodian` and never touch `f_pool_name`.
 - `f_pool_name` keeps its historical behavior and priority chain unchanged: it is the display/legacy label and existing consumers are unaffected.
 - The columns are recomputed at the end of every identify run, deterministically from the mapping tables, so incremental runs and full rebuilds converge to the same values.
