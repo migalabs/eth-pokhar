@@ -2,9 +2,16 @@
 #
 # sync-labels-to-clickhouse.sh
 #
-# Distributes the validator -> pool labels produced by eth-pokhar (Postgres,
+# Distributes the validator labels produced by eth-pokhar (Postgres,
 # t_identified_validators) to a goteth ClickHouse database (t_eth2_pubkeys),
-# implementing the design of issue #31:
+# implementing the design of issue #31. Up to three values travel per
+# validator: the display label f_pool_name, and the two pure dimensions
+# f_operator and f_custodian, so consumers can tell who runs a validator from
+# who holds its withdrawal credentials without re-deriving either.
+#
+# The dimension columns only exist in destinations that ran goteth migration
+# 000041. See SYNC_DIMENSIONS below for how a destination without them is
+# handled.
 #
 #   1. Atomic apply: the snapshot is imported into t_eth2_pubkeys_staging and
 #      applied with EXCHANGE TABLES, so consumers always see either the old or
@@ -34,6 +41,11 @@
 #                              (default: 5000, 0 disables the gate)
 #   SYNC_POOL_RENAME_ALLOWLIST optional file with one pool name per line,
 #                              exempt from the pool-drop gate (renames/splits)
+#   SYNC_DIMENSIONS            auto (default), true or false: whether to carry
+#                              f_operator and f_custodian (see below)
+#   SYNC_MIN_DIMENSION_RATIO   minimum new/old ratio for the number of rows
+#                              carrying each dimension (default: 0, ratio gate
+#                              disabled; a drop to zero is always rejected)
 #   TEXTFILE_DIR               optional node_exporter textfile directory
 #   CRON_NAME                  metric label (default: labels_sync)
 #   SYNC_LOCK_FILE             lock path (default: /tmp/labels-sync-<db>-<port>.lock)
@@ -64,6 +76,8 @@ CH_DB="${CH_DB:?CH_DB is required}"
 SYNC_MIN_COUNT_RATIO="${SYNC_MIN_COUNT_RATIO:-0.95}"
 SYNC_MAX_POOL_DROP="${SYNC_MAX_POOL_DROP:-5000}"
 SYNC_POOL_RENAME_ALLOWLIST="${SYNC_POOL_RENAME_ALLOWLIST:-}"
+SYNC_DIMENSIONS="${SYNC_DIMENSIONS:-auto}"
+SYNC_MIN_DIMENSION_RATIO="${SYNC_MIN_DIMENSION_RATIO:-0}"
 TEXTFILE_DIR="${TEXTFILE_DIR:-}"
 CRON_NAME="${CRON_NAME:-labels_sync}"
 
@@ -104,6 +118,141 @@ ch() {
 
 echo "$LOG_PREFIX $(date -u +%FT%TZ) Starting labels sync..."
 
+# ---------------------------------------------------------------- schema repair
+# A version of this script that reused the staging table could swap a stale
+# schema into t_eth2_pubkeys, leaving the columns a migration had added alive
+# only in t_eth2_pubkeys_staging. Recreating staging unconditionally would
+# then delete that last copy and make the loss permanent, so the two tables
+# are reconciled before anything is dropped: if staging carries the dimension
+# columns and the live table does not, the previous run swapped the wrong way
+# round and one more EXCHANGE puts it back.
+#
+# Scoped to the two columns this script owns on purpose. "Staging has a column
+# the live table lacks" is also what a deliberate goteth migration looks like
+# from here: a rename leaves the old name behind in staging, a drop leaves the
+# dropped column. Restoring either would revert that migration, so anything
+# beyond the dimensions is reported and left alone.
+#
+# The live table serves the previous mapping between this swap and the one at
+# the end of the run. That mapping is complete and at most one run old, which
+# is the point of doing this rather than dropping the only copy of the schema.
+LIVE_COLS=$(ch "
+    SELECT count()
+    FROM system.columns
+    WHERE database = currentDatabase() AND table = 't_eth2_pubkeys'
+") || exit 1
+if [ "$LIVE_COLS" -eq 0 ]; then
+    echo "$LOG_PREFIX ERROR: ${CH_DB}.t_eth2_pubkeys does not exist. Nothing was written."
+    exit 1
+fi
+
+ORPHAN_COLS=$(ch "
+    SELECT arrayStringConcat(arraySort(groupArray(name)), ', ')
+    FROM (
+        SELECT name FROM system.columns
+        WHERE database = currentDatabase() AND table = 't_eth2_pubkeys_staging'
+        EXCEPT
+        SELECT name FROM system.columns
+        WHERE database = currentDatabase() AND table = 't_eth2_pubkeys'
+    )
+") || exit 1
+
+# Same column list as the dimensions check below; keep the two in step.
+FOREIGN_ORPHANS=$(ch "
+    SELECT arrayStringConcat(arraySort(groupArray(name)), ', ')
+    FROM (
+        SELECT name FROM system.columns
+        WHERE database = currentDatabase()
+          AND table = 't_eth2_pubkeys_staging'
+          AND name NOT IN ('f_operator', 'f_custodian')
+        EXCEPT
+        SELECT name FROM system.columns
+        WHERE database = currentDatabase() AND table = 't_eth2_pubkeys'
+    )
+") || exit 1
+
+if [ -n "$FOREIGN_ORPHANS" ]; then
+    echo "$LOG_PREFIX WARNING: t_eth2_pubkeys_staging has columns the live table lacks ($ORPHAN_COLS), of which this script owns none ($FOREIGN_ORPHANS)."
+    echo "$LOG_PREFIX Leaving the live schema alone: a column renamed or dropped on t_eth2_pubkeys looks exactly like this from here, and restoring it would revert that migration."
+elif [ -n "$ORPHAN_COLS" ]; then
+    echo "$LOG_PREFIX WARNING: the live table is missing the dimension columns ($ORPHAN_COLS) while t_eth2_pubkeys_staging still has them."
+    echo "$LOG_PREFIX A previous run swapped a stale schema into place; restoring it with one EXCHANGE TABLES before rebuilding."
+    ch "EXCHANGE TABLES t_eth2_pubkeys AND t_eth2_pubkeys_staging" || {
+        echo "$LOG_PREFIX ERROR: schema repair swap failed, nothing was dropped"
+        exit 1
+    }
+fi
+
+# ---------------------------------------------------------------- dimensions mode
+# f_operator and f_custodian exist only in destinations that ran goteth
+# migration 000041, and deployments are not upgraded in lockstep. Refusing to
+# run against an older destination would also stop distributing pool labels
+# there, which is the silent staleness this script exists to prevent, so the
+# default adapts to the destination and says so. Resolved before any DDL, so
+# a destination that cannot take the dimensions is never left half written.
+#
+#   auto (default)  carry the dimensions when the destination has them,
+#                   distribute pool labels alone (with a warning) when it does not
+#   true            require them, fail before writing anything otherwise
+#   false           never carry them
+DIM_COLS=$(ch "
+    SELECT count()
+    FROM system.columns
+    WHERE database = currentDatabase()
+      AND table = 't_eth2_pubkeys'
+      AND name IN ('f_operator', 'f_custodian')
+") || exit 1
+
+case "$SYNC_DIMENSIONS" in
+    true)
+        if [ "$DIM_COLS" -ne 2 ]; then
+            echo "$LOG_PREFIX ERROR: SYNC_DIMENSIONS=true but ${CH_DB}.t_eth2_pubkeys has $DIM_COLS of the 2 dimension columns."
+            echo "$LOG_PREFIX Apply goteth migration 000041 to the destination first. Nothing was written."
+            exit 1
+        fi
+        CARRY_DIMENSIONS=true
+        ;;
+    false)
+        CARRY_DIMENSIONS=false
+        ;;
+    auto)
+        if [ "$DIM_COLS" -eq 2 ]; then
+            CARRY_DIMENSIONS=true
+        else
+            CARRY_DIMENSIONS=false
+            echo "$LOG_PREFIX WARNING: ${CH_DB}.t_eth2_pubkeys has $DIM_COLS of the 2 dimension columns (goteth migration 000041), syncing pool labels only"
+        fi
+        ;;
+    *)
+        echo "$LOG_PREFIX ERROR: SYNC_DIMENSIONS must be auto, true or false (got '$SYNC_DIMENSIONS')"
+        exit 1
+        ;;
+esac
+
+if [ "$CARRY_DIMENSIONS" = true ]; then
+    echo "$LOG_PREFIX Carrying entity dimensions f_operator and f_custodian"
+    SNAPSHOT_DIM_DDL=",
+        f_operator String,
+        f_custodian String"
+    SNAPSHOT_DIM_COLS=", f_operator, f_custodian"
+    # NULL in Postgres means "no declared signal for this dimension"; the
+    # destination columns are plain String defaulting to '', so the absence
+    # keeps exactly one spelling all the way through.
+    SNAPSHOT_DIM_SELECT=",
+        coalesce(f_operator, ''),
+        coalesce(f_custodian, '')"
+    STAGING_DIM_COLS=", f_operator, f_custodian"
+    STAGING_DIM_SELECT=",
+        iv.f_operator,
+        iv.f_custodian"
+else
+    SNAPSHOT_DIM_DDL=""
+    SNAPSHOT_DIM_COLS=""
+    SNAPSHOT_DIM_SELECT=""
+    STAGING_DIM_COLS=""
+    STAGING_DIM_SELECT=""
+fi
+
 # ---------------------------------------------------------------- previous state
 PREV_COUNT=$(ch "SELECT count() FROM t_eth2_pubkeys") || exit 1
 echo "$LOG_PREFIX Previous mapping: $PREV_COUNT entries"
@@ -119,29 +268,44 @@ fi
 # every distributed table reflects the same instant of the source and the
 # gates below vouch for all of them. A second postgresql() read for the
 # mirror would reintroduce the cross-table drift issue #31 exists to prevent.
-ch "CREATE TABLE IF NOT EXISTS t_labels_snapshot (
+# Recreated rather than CREATE IF NOT EXISTS plus TRUNCATE: the table is
+# ephemeral, and deployments that ran an earlier version of this script still
+# have it with the pre-dimension schema, which IF NOT EXISTS would keep
+# forever. Unqualified names resolve in CH_DB, so each destination database
+# owns its own snapshot and concurrent runs against different ones do not
+# collide.
+ch "DROP TABLE IF EXISTS t_labels_snapshot" || exit 1
+ch "CREATE TABLE t_labels_snapshot (
         f_validator_pubkey String,
-        f_pool_name String
+        f_pool_name String${SNAPSHOT_DIM_DDL}
     ) ENGINE = MergeTree ORDER BY tuple()" || exit 1
-ch "TRUNCATE TABLE t_labels_snapshot" || exit 1
 
 echo "$LOG_PREFIX Importing labels snapshot from Postgres..."
 ch "
-    INSERT INTO t_labels_snapshot (f_validator_pubkey, f_pool_name)
-    SELECT f_validator_pubkey, f_pool_name
+    INSERT INTO t_labels_snapshot (f_validator_pubkey, f_pool_name${SNAPSHOT_DIM_COLS})
+    SELECT
+        f_validator_pubkey,
+        f_pool_name${SNAPSHOT_DIM_SELECT}
     FROM postgresql('${PG_HOST}:${PG_PORT}', '${PG_DB}', 't_identified_validators', '${PG_USER}', '${PG_PASS}')
 " || { echo "$LOG_PREFIX ERROR: snapshot import failed, live mapping untouched"; exit 1; }
 
-ch "CREATE TABLE IF NOT EXISTS t_eth2_pubkeys_staging AS t_eth2_pubkeys" || exit 1
-ch "TRUNCATE TABLE t_eth2_pubkeys_staging" || exit 1
+# Recreated, not reused: EXCHANGE TABLES swaps names without comparing
+# schemas, so a staging table left over from before a column was added to
+# t_eth2_pubkeys swaps that column straight back out of the live table, with
+# no error and no way to tell from the log. Recreating costs nothing here,
+# because the rollback copy this table is meant to hold is the one the swap
+# below puts there, not the one from the previous run, which the old code
+# truncated at exactly this point anyway.
+ch "DROP TABLE IF EXISTS t_eth2_pubkeys_staging" || exit 1
+ch "CREATE TABLE t_eth2_pubkeys_staging AS t_eth2_pubkeys" || exit 1
 
 ch "
-    INSERT INTO t_eth2_pubkeys_staging (f_val_idx, f_public_key, f_pool_name, f_pool)
+    INSERT INTO t_eth2_pubkeys_staging (f_val_idx, f_public_key, f_pool_name, f_pool${STAGING_DIM_COLS})
     SELECT
         vls.f_val_idx,
         vls.f_public_key,
         iv.f_pool_name,
-        iv.f_pool_name AS f_pool
+        iv.f_pool_name AS f_pool${STAGING_DIM_SELECT}
     FROM t_labels_snapshot AS iv
     INNER JOIN t_validator_last_status AS vls
         ON concat('0x', iv.f_validator_pubkey) = vls.f_public_key
@@ -188,6 +352,35 @@ if [ "$PREV_COUNT" -gt 0 ] && [ "$SYNC_MAX_POOL_DROP" -gt 0 ]; then
         echo "$LOG_PREFIX GATE FAILED: pool drops above threshold ($SYNC_MAX_POOL_DROP), live mapping untouched."
         echo "$LOG_PREFIX If these are legitimate renames or splits, add the pool names to the rename allowlist and rerun:"
         echo "$VIOLATIONS" | while read -r line; do echo "$LOG_PREFIX   $line"; done
+        exit 1
+    fi
+fi
+
+# A pool that stops being populated upstream shows up in the pool-drop gate
+# above; a dimension that does not would quietly blank the column for every
+# validator instead. A drop to zero from a non-zero previous state is
+# unambiguous breakage and is always rejected; smaller drops need an explicit
+# ratio, because the first run against a freshly migrated destination
+# legitimately goes from no coverage at all to full coverage.
+if [ "$CARRY_DIMENSIONS" = true ] && [ "$PREV_COUNT" -gt 0 ]; then
+    PREV_DIMS=$(ch "
+        SELECT countIf(f_operator != ''), countIf(f_custodian != '')
+        FROM t_eth2_pubkeys FINAL FORMAT TSV") || exit 1
+    NEW_DIMS=$(ch "
+        SELECT countIf(f_operator != ''), countIf(f_custodian != '')
+        FROM t_eth2_pubkeys_staging FINAL FORMAT TSV") || exit 1
+    read -r PREV_OP PREV_CUST <<< "$PREV_DIMS"
+    read -r NEW_OP NEW_CUST <<< "$NEW_DIMS"
+    DIM_VIOLATIONS=$(awk -v po="$PREV_OP" -v pc="$PREV_CUST" -v no="$NEW_OP" -v nc="$NEW_CUST" \
+        -v r="$SYNC_MIN_DIMENSION_RATIO" 'BEGIN {
+            if (po > 0 && no == 0) printf "f_operator lost every row (%d -> 0)\n", po
+            else if (r > 0 && po > 0 && no < po * r) printf "f_operator dropped below ratio %s (%d -> %d)\n", r, po, no
+            if (pc > 0 && nc == 0) printf "f_custodian lost every row (%d -> 0)\n", pc
+            else if (r > 0 && pc > 0 && nc < pc * r) printf "f_custodian dropped below ratio %s (%d -> %d)\n", r, pc, nc
+        }')
+    if [ -n "$DIM_VIOLATIONS" ]; then
+        echo "$LOG_PREFIX GATE FAILED: entity dimension coverage collapsed, live mapping untouched."
+        echo "$DIM_VIOLATIONS" | while read -r line; do echo "$LOG_PREFIX   $line"; done
         exit 1
     fi
 fi
