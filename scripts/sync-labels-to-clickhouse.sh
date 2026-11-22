@@ -46,6 +46,9 @@
 #   SYNC_MIN_DIMENSION_RATIO   minimum new/old ratio for the number of rows
 #                              carrying each dimension (default: 0, ratio gate
 #                              disabled; a drop to zero is always rejected)
+#   SYNC_DIMENSIONS_MIGRATION  goteth migration that adds the dimension columns
+#                              (default: 41); the schema repair below only runs
+#                              while the destination is at or past it
 #   TEXTFILE_DIR               optional node_exporter textfile directory
 #   CRON_NAME                  metric label (default: labels_sync)
 #   SYNC_LOCK_FILE             lock path (default: /tmp/labels-sync-<db>-<port>.lock)
@@ -78,6 +81,7 @@ SYNC_MAX_POOL_DROP="${SYNC_MAX_POOL_DROP:-5000}"
 SYNC_POOL_RENAME_ALLOWLIST="${SYNC_POOL_RENAME_ALLOWLIST:-}"
 SYNC_DIMENSIONS="${SYNC_DIMENSIONS:-auto}"
 SYNC_MIN_DIMENSION_RATIO="${SYNC_MIN_DIMENSION_RATIO:-0}"
+SYNC_DIMENSIONS_MIGRATION="${SYNC_DIMENSIONS_MIGRATION:-41}"
 TEXTFILE_DIR="${TEXTFILE_DIR:-}"
 CRON_NAME="${CRON_NAME:-labels_sync}"
 
@@ -133,6 +137,13 @@ echo "$LOG_PREFIX $(date -u +%FT%TZ) Starting labels sync..."
 # dropped column. Restoring either would revert that migration, so anything
 # beyond the dimensions is reported and left alone.
 #
+# A deliberate rollback of the dimensions (goteth's down migration drops both
+# columns) leaves the same trace, so the swap also requires goteth's migration
+# state to say the columns should be there: the latest schema_migrations row
+# is clean and at or past SYNC_DIMENSIONS_MIGRATION. Below it, the columns
+# were dropped on purpose and staging is rebuilt without them. When the state
+# cannot be read, the run stops before dropping anything and asks for a hand.
+#
 # The live table serves the previous mapping between this swap and the one at
 # the end of the run. That mapping is complete and at most one run old, which
 # is the point of doing this rather than dropping the only copy of the schema.
@@ -176,11 +187,27 @@ if [ -n "$FOREIGN_ORPHANS" ]; then
     echo "$LOG_PREFIX Leaving the live schema alone: a column renamed or dropped on t_eth2_pubkeys looks exactly like this from here, and restoring it would revert that migration."
 elif [ -n "$ORPHAN_COLS" ]; then
     echo "$LOG_PREFIX WARNING: the live table is missing the dimension columns ($ORPHAN_COLS) while t_eth2_pubkeys_staging still has them."
-    echo "$LOG_PREFIX A previous run swapped a stale schema into place; restoring it with one EXCHANGE TABLES before rebuilding."
-    ch "EXCHANGE TABLES t_eth2_pubkeys AND t_eth2_pubkeys_staging" || {
-        echo "$LOG_PREFIX ERROR: schema repair swap failed, nothing was dropped"
-        exit 1
+    # golang-migrate keeps the current version in the row with the highest
+    # sequence; -1 means every migration was rolled back.
+    MIGRATION_ERROR=""
+    MIGRATION_STATE=$(ch "SELECT version, dirty FROM schema_migrations ORDER BY sequence DESC LIMIT 1 FORMAT TSV" 2>&1) || {
+        MIGRATION_ERROR=$(printf '%s' "$MIGRATION_STATE" | head -n 1)
+        MIGRATION_STATE=""
     }
+    read -r MIGRATION_VERSION MIGRATION_DIRTY <<< "$MIGRATION_STATE"
+    if ! [[ "${MIGRATION_VERSION:-}" =~ ^-?[0-9]+$ ]] || [ "${MIGRATION_DIRTY:-}" != "0" ]; then
+        echo "$LOG_PREFIX ERROR: cannot tell whether the dimension columns were dropped on purpose: goteth's schema_migrations is missing, empty or dirty ('$MIGRATION_STATE'${MIGRATION_ERROR:+, $MIGRATION_ERROR}). Nothing was dropped."
+        echo "$LOG_PREFIX Resolve by hand: EXCHANGE TABLES t_eth2_pubkeys AND t_eth2_pubkeys_staging if migration $SYNC_DIMENSIONS_MIGRATION is applied, or DROP TABLE t_eth2_pubkeys_staging if it was rolled back."
+        exit 1
+    elif [ "$MIGRATION_VERSION" -lt "$SYNC_DIMENSIONS_MIGRATION" ]; then
+        echo "$LOG_PREFIX goteth is at migration $MIGRATION_VERSION, below $SYNC_DIMENSIONS_MIGRATION: the dimension columns were rolled back on purpose. Leaving the live schema alone; staging is rebuilt without them."
+    else
+        echo "$LOG_PREFIX goteth is at migration $MIGRATION_VERSION: a previous run swapped a stale schema into place; restoring it with one EXCHANGE TABLES before rebuilding."
+        ch "EXCHANGE TABLES t_eth2_pubkeys AND t_eth2_pubkeys_staging" || {
+            echo "$LOG_PREFIX ERROR: schema repair swap failed, nothing was dropped"
+            exit 1
+        }
+    fi
 fi
 
 # ---------------------------------------------------------------- dimensions mode
@@ -343,11 +370,21 @@ if [ "$PREV_COUNT" -gt 0 ] && [ "$SYNC_MAX_POOL_DROP" -gt 0 ]; then
         NR == FNR { newc[$1] = $2; next }
         {
             drop = $2 - newc[$1]
-            if (drop > maxdrop && !($1 in allowed)) {
+            if ($1 in allowed) {
+                if (drop > 0) printf "ALLOWED %s lost %d validators (%d -> %d)\n", $1, drop, $2, newc[$1]
+            } else if (drop > maxdrop) {
                 printf "%s lost %d validators (%d -> %d)\n", $1, drop, $2, newc[$1]
             }
         }
     ' "$TMPDIR_SYNC/pools_new.tsv" "$TMPDIR_SYNC/pools_prev.tsv")
+    # Allowlisted pools are reported, not gated, so the run that needed the
+    # allowlist leaves a record of what it let through.
+    ALLOWED_DROPS=$(printf '%s\n' "$VIOLATIONS" | grep '^ALLOWED ' | sed 's/^ALLOWED //')
+    VIOLATIONS=$(printf '%s\n' "$VIOLATIONS" | grep -v '^ALLOWED ' | sed '/^$/d')
+    if [ -n "$ALLOWED_DROPS" ]; then
+        echo "$LOG_PREFIX Allowlisted pool drops (not gated):"
+        echo "$ALLOWED_DROPS" | while read -r line; do echo "$LOG_PREFIX   $line"; done
+    fi
     if [ -n "$VIOLATIONS" ]; then
         echo "$LOG_PREFIX GATE FAILED: pool drops above threshold ($SYNC_MAX_POOL_DROP), live mapping untouched."
         echo "$LOG_PREFIX If these are legitimate renames or splits, add the pool names to the rename allowlist and rerun:"
@@ -402,10 +439,12 @@ post_swap_fail() {
 # val_idx assignment (labels for deposits still in the pending queue). Same
 # staging + EXCHANGE pattern, built from t_labels_snapshot: the exact same
 # gated read of Postgres the main mapping was built from, never a second one.
+# Its staging table is recreated for the same reason as t_eth2_pubkeys_staging:
+# a reused one would swap a stale schema into t_pubkey_pool.
 if [ "${SYNC_PUBKEY_POOL:-false}" = "true" ]; then
     echo "$LOG_PREFIX Syncing t_pubkey_pool mirror..."
-    ch "CREATE TABLE IF NOT EXISTS t_pubkey_pool_staging AS t_pubkey_pool" || post_swap_fail "t_pubkey_pool staging setup"
-    ch "TRUNCATE TABLE t_pubkey_pool_staging" || post_swap_fail "t_pubkey_pool staging truncate"
+    ch "DROP TABLE IF EXISTS t_pubkey_pool_staging" || post_swap_fail "t_pubkey_pool staging drop"
+    ch "CREATE TABLE t_pubkey_pool_staging AS t_pubkey_pool" || post_swap_fail "t_pubkey_pool staging setup"
     ch "
         INSERT INTO t_pubkey_pool_staging (f_public_key, f_pool_name)
         SELECT
