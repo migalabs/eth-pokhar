@@ -1,6 +1,7 @@
 package lido
 
 import (
+	"context"
 	"encoding/binary"
 	"math/big"
 	"strings"
@@ -81,8 +82,8 @@ var CuratedCanonicalOperators = []string{
 // getOperatorGroup(group).externalOperators, which reference module 1 (the
 // curated NodeOperatorsRegistry). Operators 3 and 6 belong to no group; their
 // link comes from where their stake was consolidated from (rockx_lido and
-// consensyscodefi_lido). CheckCMv2OperatorLinks reports drift against the
-// chain; an operator missing here keeps its index tag lido_cmv2_operator<N>.
+// consensyscodefi_lido). identify.warnCMv2OperatorDrift reports drift against
+// the chain; an operator missing here keeps its index tag lido_cmv2_operator<N>.
 var CMv2CuratedOperator = map[uint64]uint64{
 	0: 29, 1: 22, 2: 16, 3: 9, 4: 33, 5: 5, 6: 21, 7: 5, 8: 25, 9: 24,
 	10: 34, 11: 34, 12: 18, 13: 35, 14: 31, 15: 7, 16: 13, 17: 15, 18: 14, 19: 4,
@@ -125,55 +126,100 @@ func DecodeExternalOperator(data []byte) (moduleID uint16, operatorID uint64, er
 
 // CMv2CuratedLinksOnChain returns, for CMv2 node operators 0..count-1, the
 // curated v1 operator the MetaRegistry groups each one with. Operators in no
-// group, or whose group references no curated v1 operator, are absent.
-func CMv2CuratedLinksOnChain(nodeEndpoint string, count uint64) (map[uint64]uint64, error) {
-	ethClient, err := ethclient.Dial(nodeEndpoint)
+// group, or whose group references no curated v1 operator, are absent from
+// links. An operator whose group could not be read or decoded is reported in
+// unchecked instead, so one bad answer leaves the rest of the check standing.
+// err is only set when the check cannot run at all, or ctx ended it early.
+// It serves a best-effort check, so every call gives up after maxRateLimited
+// rate limited answers.
+func CMv2CuratedLinksOnChain(ctx context.Context, nodeEndpoint string, count uint64, maxRateLimited int) (links map[uint64]uint64, unchecked map[uint64]error, err error) {
+	ethClient, err := ethclient.DialContext(ctx, nodeEndpoint)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer ethClient.Close()
 	parsed, err := abi.JSON(strings.NewReader(cmv2MetaRegistryABI))
 	if err != nil {
-		return nil, errors.Wrap(err, "error parsing MetaRegistry ABI")
+		return nil, nil, errors.Wrap(err, "error parsing MetaRegistry ABI")
 	}
 	contract := bind.NewBoundContract(common.HexToAddress(CMv2MetaRegistryAddress), parsed, ethClient, nil, nil)
 
-	links := make(map[uint64]uint64)
+	links = make(map[uint64]uint64)
+	unchecked = make(map[uint64]error)
+	// A group is shared by several operators: read and decode each one once.
+	groups := make(map[string]curatedLink)
 	for op := uint64(0); op < count; op++ {
-		groupRes, err := RetryContractCall(func() (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return links, unchecked, errors.Wrapf(err, "stopped at CMv2 operator %d", op)
+		}
+		groupRes, err := RetryContractCallContext(ctx, maxRateLimited, func() (interface{}, error) {
 			var out []interface{}
-			if err := contract.Call(&bind.CallOpts{}, &out, "getNodeOperatorGroupId", new(big.Int).SetUint64(op)); err != nil {
+			if err := contract.Call(&bind.CallOpts{Context: ctx}, &out, "getNodeOperatorGroupId", new(big.Int).SetUint64(op)); err != nil {
 				return nil, err
 			}
 			return *abi.ConvertType(out[0], new(*big.Int)).(**big.Int), nil
 		})
 		if err != nil {
-			return nil, errors.Wrapf(err, "group of CMv2 operator %d", op)
+			unchecked[op] = errors.Wrap(err, "reading its group")
+			continue
 		}
 		groupID := groupRes.(*big.Int)
 		if groupID.Sign() == 0 {
 			continue
 		}
-		groupRaw, err := RetryContractCall(func() (interface{}, error) {
-			var out []interface{}
-			if err := contract.Call(&bind.CallOpts{}, &out, "getOperatorGroup", groupID); err != nil {
-				return nil, err
-			}
-			return *abi.ConvertType(out[0], new(cmv2OperatorGroup)).(*cmv2OperatorGroup), nil
-		})
-		if err != nil {
-			return nil, errors.Wrapf(err, "group %s of CMv2 operator %d", groupID, op)
+		group, seen := groups[groupID.String()]
+		if !seen {
+			group = readCuratedLink(ctx, contract, groupID, maxRateLimited)
+			groups[groupID.String()] = group
 		}
-		for _, ext := range groupRaw.(cmv2OperatorGroup).ExternalOperators {
-			moduleID, operatorID, err := DecodeExternalOperator(ext.Data)
-			if err != nil {
-				return nil, errors.Wrapf(err, "group %s of CMv2 operator %d", groupID, op)
-			}
-			if moduleID == 1 {
-				links[op] = operatorID
-				break
-			}
+		switch {
+		case group.err != nil:
+			unchecked[op] = errors.Wrapf(group.err, "group %s", groupID)
+		case group.linked:
+			links[op] = group.curated
 		}
 	}
-	return links, nil
+	return links, unchecked, nil
+}
+
+// curatedLink is what one MetaRegistry group says about curated v1: the
+// operator it references (linked), none, or that it could not be read (err).
+type curatedLink struct {
+	curated uint64
+	linked  bool
+	err     error
+}
+
+// readCuratedLink reads one MetaRegistry group and returns the curated v1
+// operator among its external operators. An external operator that does not
+// decode is skipped when another one of the group decodes as curated v1, since
+// only that one matters here; otherwise the group is reported as unreadable.
+func readCuratedLink(ctx context.Context, contract *bind.BoundContract, groupID *big.Int, maxRateLimited int) (link curatedLink) {
+	groupRaw, err := RetryContractCallContext(ctx, maxRateLimited, func() (interface{}, error) {
+		var out []interface{}
+		if err := contract.Call(&bind.CallOpts{Context: ctx}, &out, "getOperatorGroup", groupID); err != nil {
+			return nil, err
+		}
+		return *abi.ConvertType(out[0], new(cmv2OperatorGroup)).(*cmv2OperatorGroup), nil
+	})
+	if err != nil {
+		link.err = err
+		return link
+	}
+	var decodeErrs []error
+	for _, ext := range groupRaw.(cmv2OperatorGroup).ExternalOperators {
+		moduleID, operatorID, err := DecodeExternalOperator(ext.Data)
+		if err != nil {
+			decodeErrs = append(decodeErrs, err)
+			continue
+		}
+		if moduleID == 1 {
+			link.curated, link.linked = operatorID, true
+			return link
+		}
+	}
+	if len(decodeErrs) > 0 {
+		link.err = errors.Errorf("%d external operators do not decode, first: %v", len(decodeErrs), decodeErrs[0])
+	}
+	return link
 }

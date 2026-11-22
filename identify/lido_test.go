@@ -1,6 +1,7 @@
 package identify
 
 import (
+	"context"
 	"math/big"
 	"os"
 	"reflect"
@@ -47,7 +48,7 @@ func TestCSMFamilyOnMainnet(t *testing.T) {
 		t.Skip("POKHAR_TEST_EL_ENDPOINT not set")
 	}
 
-	ids, err := lido.GetStakingModuleIds(endpoint)
+	ids, err := lido.GetStakingModuleIds(context.Background(), endpoint, 10)
 	if err != nil {
 		t.Fatalf("listing staking modules: %v", err)
 	}
@@ -60,6 +61,7 @@ func TestCSMFamilyOnMainnet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", module.name, err)
 		}
+		defer contract.Close()
 		count, err := contract.GetNodeOperatorsCount()
 		if err != nil || count == 0 {
 			t.Fatalf("%s: operators=%d err=%v", module.name, count, err)

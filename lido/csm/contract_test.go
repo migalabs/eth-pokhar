@@ -69,5 +69,13 @@ func TestNewModuleTagsStayOutOfCSMFilters(t *testing.T) {
 				t.Errorf("%q must not match %q", tag, pattern)
 			}
 		}
+		// Unlike the older Lido tags, these do not end in "_lido" (LIKE
+		// '%\_lido'). No consumer matches on that suffix: BindEth and the
+		// website take Lido as '%lido%' and CSM as the patterns above. Checked
+		// so that adopting the suffix is a decision, since it would put the
+		// operator tags inside a future '%\_lido' filter.
+		if strings.HasSuffix(tag, "_lido") {
+			t.Errorf("%q ends in _lido: check the consumers before changing the convention", tag)
+		}
 	}
 }

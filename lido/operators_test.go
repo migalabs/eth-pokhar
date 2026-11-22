@@ -1,14 +1,18 @@
 package lido
 
 import (
+	"context"
 	"os"
 	"regexp"
 	"testing"
 )
 
 func TestCuratedCanonicalOperators(t *testing.T) {
-	if got := len(CuratedCanonicalOperators); got != 39 {
-		t.Fatalf("expected one operator per curated registry index (39), got %d", got)
+	// The registry only grows. curated.TestCanonicalOperatorPerDisplayName
+	// keeps this list in step with the display names; the run warns when the
+	// chain has more operators than either.
+	if got := len(CuratedCanonicalOperators); got < 39 {
+		t.Fatalf("expected one operator per curated registry index (at least 39), got %d", got)
 	}
 	urlSafe := regexp.MustCompile(`^[a-z0-9._-]+$`)
 	seen := map[string]int{}
@@ -55,9 +59,12 @@ func TestCMv2CuratedOperatorMatchesChain(t *testing.T) {
 	if endpoint == "" {
 		t.Skip("POKHAR_TEST_EL_ENDPOINT not set")
 	}
-	links, err := CMv2CuratedLinksOnChain(endpoint, uint64(len(CMv2CuratedOperator)))
+	links, unchecked, err := CMv2CuratedLinksOnChain(context.Background(), endpoint, uint64(len(CMv2CuratedOperator)), 10)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for op, err := range unchecked {
+		t.Errorf("CMv2 operator %d: group not readable: %v", op, err)
 	}
 	for op, static := range CMv2CuratedOperator {
 		chain, grouped := links[op]

@@ -15,6 +15,7 @@ const NODE_OPS_ADDRESS = "0xae7B191a31F627b4eB1d4DaC64eaB9976995b433"
 
 type SDVTContract struct {
 	contract *curated.NodeOperatorsRegistryCaller
+	client   *ethclient.Client
 	address  string
 }
 
@@ -23,13 +24,19 @@ func NewSDVTContract(nodeEndpoint string) (*SDVTContract, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer ethClient.Close()
 
 	contract, err := curated.NewNodeOperatorsRegistryCaller(common.HexToAddress(NODE_OPS_ADDRESS), ethClient)
 	if err != nil {
+		ethClient.Close()
 		return nil, err
 	}
-	return &SDVTContract{contract: contract, address: NODE_OPS_ADDRESS}, nil
+	return &SDVTContract{contract: contract, client: ethClient, address: NODE_OPS_ADDRESS}, nil
+}
+
+// Close releases the connection to the execution endpoint. The contract must
+// not be used afterwards. It is safe for concurrent calls until then.
+func (s *SDVTContract) Close() {
+	s.client.Close()
 }
 
 func (s *SDVTContract) GetNodeOperatorsCount() (int64, error) {
@@ -71,8 +78,13 @@ func (s *SDVTContract) GetOperatorData(index *big.Int) (curated.NodeOperator, er
 }
 
 func (s *SDVTContract) GetOperatorKeys(operator curated.NodeOperator, offset uint64, limit uint64) (curated.OperatorKeys, error) {
+	// A truncated answer is retried like any other failed call.
 	result, err := lido.RetryContractCall(func() (interface{}, error) {
-		return s.contract.GetSigningKeys(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(offset)), big.NewInt(int64(limit)))
+		keys, err := s.contract.GetSigningKeys(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(offset)), big.NewInt(int64(limit)))
+		if err != nil {
+			return nil, err
+		}
+		return keys, lido.CheckPubkeysLength(keys.Pubkeys, limit)
 	})
 	if err != nil {
 		return curated.OperatorKeys{}, err

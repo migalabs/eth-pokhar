@@ -1,9 +1,11 @@
 package csm
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	lido "github.com/migalabs/eth-pokhar/lido"
@@ -40,6 +42,7 @@ const (
 
 type CSMContract struct {
 	contract *CsmCaller
+	client   *ethclient.Client
 	address  string
 }
 
@@ -55,14 +58,34 @@ func NewContractAt(nodeEndpoint string, address string) (*CSMContract, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer ethClient.Close()
 
 	contract, err := NewCsmCaller(common.HexToAddress(address), ethClient)
 	if err != nil {
+		ethClient.Close()
 		return nil, err
 	}
-	return &CSMContract{contract: contract, address: address}, nil
+	return &CSMContract{contract: contract, client: ethClient, address: address}, nil
 }
+
+// Close releases the connection to the execution endpoint. The contract must
+// not be used afterwards. It is safe for concurrent calls until then.
+func (l *CSMContract) Close() {
+	l.client.Close()
+}
+
+// GetNodeOperatorsCountContext is GetNodeOperatorsCount for best-effort
+// checks: it stops once ctx is done and after maxRateLimited rate limited
+// answers.
+func (l *CSMContract) GetNodeOperatorsCountContext(ctx context.Context, maxRateLimited int) (int64, error) {
+	result, err := lido.RetryContractCallContext(ctx, maxRateLimited, func() (interface{}, error) {
+		return l.contract.GetNodeOperatorsCount(&bind.CallOpts{Context: ctx})
+	})
+	if err != nil {
+		return 0, err
+	}
+	return result.(*big.Int).Int64(), nil
+}
+
 func (l *CSMContract) GetNodeOperatorsCount() (int64, error) {
 	result, err := lido.RetryContractCall(func() (interface{}, error) {
 		return l.contract.GetNodeOperatorsCount(nil)
@@ -88,8 +111,13 @@ func (l *CSMContract) GetOperatorData(index *big.Int) (NodeOperatorCustom, error
 }
 
 func (l *CSMContract) GetOperatorKeys(operator NodeOperatorCustom, startIndex uint64, keyCount uint64) ([][]byte, error) {
+	// A truncated answer is retried like any other failed call.
 	result, err := lido.RetryContractCall(func() (interface{}, error) {
-		return l.contract.GetSigningKeys(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(startIndex)), big.NewInt(int64(keyCount)))
+		keys, err := l.contract.GetSigningKeys(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(startIndex)), big.NewInt(int64(keyCount)))
+		if err != nil {
+			return nil, err
+		}
+		return keys, lido.CheckPubkeysLength(keys, keyCount)
 	})
 	if err != nil {
 		return [][]byte{}, err

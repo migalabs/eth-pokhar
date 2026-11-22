@@ -1,6 +1,7 @@
 package lido
 
 import (
+	"context"
 	"math/big"
 	"strings"
 
@@ -21,9 +22,10 @@ const StakingRouterAddress = "0xFdDf38947aFB03C621C71b06C9C70bce73f12999"
 const stakingRouterABI = `[{"inputs":[],"name":"getStakingModuleIds","outputs":[{"internalType":"uint256[]","name":"stakingModuleIds","type":"uint256[]"}],"stateMutability":"view","type":"function"}]`
 
 // GetStakingModuleIds returns the ids of every module registered in the
-// StakingRouter.
-func GetStakingModuleIds(nodeEndpoint string) ([]uint64, error) {
-	ethClient, err := ethclient.Dial(nodeEndpoint)
+// StakingRouter. It serves a best-effort check, so it stops once ctx is done
+// and after maxRateLimited rate limited answers.
+func GetStakingModuleIds(ctx context.Context, nodeEndpoint string, maxRateLimited int) ([]uint64, error) {
+	ethClient, err := ethclient.DialContext(ctx, nodeEndpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -35,9 +37,9 @@ func GetStakingModuleIds(nodeEndpoint string) ([]uint64, error) {
 	}
 	contract := bind.NewBoundContract(common.HexToAddress(StakingRouterAddress), parsed, ethClient, nil, nil)
 
-	result, err := RetryContractCall(func() (interface{}, error) {
+	result, err := RetryContractCallContext(ctx, maxRateLimited, func() (interface{}, error) {
 		var out []interface{}
-		if err := contract.Call(&bind.CallOpts{}, &out, "getStakingModuleIds"); err != nil {
+		if err := contract.Call(&bind.CallOpts{Context: ctx}, &out, "getStakingModuleIds"); err != nil {
 			return nil, err
 		}
 		if len(out) != 1 {

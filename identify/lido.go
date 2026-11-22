@@ -1,6 +1,7 @@
 package identify
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -19,6 +20,46 @@ import (
 )
 
 const maxBatchSize = 500
+
+const (
+	// lidoCheckTimeout bounds each best-effort check that runs before the
+	// modules (the CMv2 one makes about a hundred sequential calls), so a slow
+	// or rate limited endpoint delays the run by at most this much.
+	lidoCheckTimeout = 3 * time.Minute
+	// lidoCheckMaxRateLimited caps the rate limited retries of one check call,
+	// where the key registry reads retry them without limit.
+	lidoCheckMaxRateLimited = 10
+)
+
+// operatorErrors collects the failures of a module's operators, which run
+// concurrently, so the module reports them instead of looking successful while
+// those operators' keys stay unlabelled.
+type operatorErrors struct {
+	mu    sync.Mutex
+	count int
+	first error
+}
+
+func (e *operatorErrors) add(err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.count == 0 {
+		e.first = err
+	}
+	e.count++
+}
+
+// err sums the failures up in one error, since an unreachable endpoint fails
+// every operator of the module the same way. Each one is also logged as it
+// happens.
+func (e *operatorErrors) err() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.count == 0 {
+		return nil
+	}
+	return fmt.Errorf("%d operators failed, first: %w", e.count, e.first)
+}
 
 // lidoModuleStats aggregates per-operator outcomes of a module pass.
 type lidoModuleStats struct {
@@ -117,6 +158,7 @@ func lidoDimensions() db.LidoDimensions {
 	for _, op := range cmv2Operators {
 		curated := lido.CMv2CuratedOperator[op]
 		if curated >= uint64(len(lido.CuratedCanonicalOperators)) {
+			log.Warnf("lido.CMv2CuratedOperator links CMv2 operator %d to curated operator %d, which lido.CuratedCanonicalOperators does not list: it keeps its own operator tag until the list is extended", op, curated)
 			continue
 		}
 		d.OperatorProtocols = append(d.OperatorProtocols, db.LidoProtocolCMv2)
@@ -126,29 +168,65 @@ func lidoDimensions() db.LidoDimensions {
 	return d
 }
 
+// checkContext bounds one best-effort check: it ends after lidoCheckTimeout,
+// or as soon as the run is asked to stop.
+func (i *Identify) checkContext() (context.Context, context.CancelFunc) {
+	parent := i.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, lidoCheckTimeout)
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if i.stop {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ctx, cancel
+}
+
 // warnCMv2OperatorDrift compares the static CMv2 -> curated v1 operator links
 // with the MetaRegistry groups and warns about new operators and changed
 // links, which would otherwise leave a company split across two operator
 // labels without anyone noticing. Operators the MetaRegistry puts in no group
 // are expected to be linked by hand (see lido.CMv2CuratedOperator). Best
-// effort: a failed check never blocks the run.
+// effort: a failed check never blocks the run, it is bounded by checkContext,
+// and an operator whose group cannot be read is reported on its own.
 func (i *Identify) warnCMv2OperatorDrift() {
+	ctx, cancel := i.checkContext()
+	defer cancel()
 	module, err := csm.NewContractAt(i.iConfig.ElEndpoint, csm.CMv2ContractAddress)
 	if err != nil {
 		log.Warnf("Could not check CMv2 operator links: %v", err)
 		return
 	}
-	count, err := module.GetNodeOperatorsCount()
+	defer module.Close()
+	count, err := module.GetNodeOperatorsCountContext(ctx, lidoCheckMaxRateLimited)
 	if err != nil {
 		log.Warnf("Could not check CMv2 operator links: %v", err)
 		return
 	}
-	onChain, err := lido.CMv2CuratedLinksOnChain(i.iConfig.ElEndpoint, uint64(count))
+	onChain, unchecked, err := lido.CMv2CuratedLinksOnChain(ctx, i.iConfig.ElEndpoint, uint64(count), lidoCheckMaxRateLimited)
 	if err != nil {
+		// A partial answer would report the operators it never reached as
+		// unlinked, so it is not compared at all.
 		log.Warnf("Could not check CMv2 operator links: %v", err)
 		return
 	}
 	for op := uint64(0); op < uint64(count); op++ {
+		if err, failed := unchecked[op]; failed {
+			log.Warnf("Could not check the link of CMv2 operator %d: %v", op, err)
+			continue
+		}
 		static, known := lido.CMv2CuratedOperator[op]
 		chain, grouped := onChain[op]
 		switch {
@@ -165,9 +243,12 @@ func (i *Identify) warnCMv2OperatorDrift() {
 // warnUnscannedStakingModules flags StakingRouter modules pokhar does not read.
 // Their keys never reach t_lido, so their validators fall back to the
 // StakingRouter depositor label "lido" (issue #47); this is the tripwire for
-// the next module Lido adds. Best effort: a failed check never blocks the run.
+// the next module Lido adds. Best effort: a failed check never blocks the run,
+// and it is bounded by checkContext.
 func (i *Identify) warnUnscannedStakingModules() {
-	ids, err := lido.GetStakingModuleIds(i.iConfig.ElEndpoint)
+	ctx, cancel := i.checkContext()
+	defer cancel()
+	ids, err := lido.GetStakingModuleIds(ctx, i.iConfig.ElEndpoint, lidoCheckMaxRateLimited)
 	if err != nil {
 		log.Warnf("Could not list Lido staking modules: %v", err)
 		return
@@ -178,6 +259,9 @@ func (i *Identify) warnUnscannedStakingModules() {
 }
 
 func (i *Identify) IdentifyLidoValidators() error {
+	if i.stop {
+		return nil
+	}
 	i.warnUnscannedStakingModules()
 	i.warnCMv2OperatorDrift()
 
@@ -194,24 +278,39 @@ func (i *Identify) IdentifyLidoValidators() error {
 	// the weekly RECREATE_TABLE run t_identified_validators starts truncated
 	// and the depositor phases leave t_lido keys alone, so every Lido
 	// validator would stay solo_stakers until the next run.
+	//
+	// A stop request ends the pass between modules and skips the UPDATE: the
+	// process is shutting down, and the next run labels from t_lido again.
 	var moduleErrs []error
+	if i.stop {
+		return nil
+	}
 	log.Debug("Identifying lido curated module validators")
 	if err := i.identifyCuratedModule(keyCounts); err != nil {
 		moduleErrs = append(moduleErrs, fmt.Errorf("curated: %w", err))
 	}
 
+	if i.stop {
+		return errors.Join(moduleErrs...)
+	}
 	log.Debug("Identifying lido SDVT module validators")
 	if err := i.identifySDVT(keyCounts); err != nil {
 		moduleErrs = append(moduleErrs, fmt.Errorf("SDVT: %w", err))
 	}
 
 	for _, module := range csmFamilyModules {
+		if i.stop {
+			return errors.Join(moduleErrs...)
+		}
 		log.Debugf("Identifying lido %s validators", module.name)
 		if err := i.identifyCSMFamily(module, keyCounts); err != nil {
 			moduleErrs = append(moduleErrs, fmt.Errorf("%s: %w", module.name, err))
 		}
 	}
 
+	if i.stop {
+		return errors.Join(moduleErrs...)
+	}
 	// One single pass over t_lido after every module updated it: the UPDATE
 	// joins half a million keys against t_identified_validators, so running it
 	// per module multiplied the cost for the same final state.
@@ -237,6 +336,7 @@ func (i *Identify) identifySDVT(keyCounts map[string]uint64) error {
 	if err != nil {
 		return err
 	}
+	defer sdvtContract.Close()
 
 	operatorsCount, err := sdvtContract.GetNodeOperatorsCount()
 	if err != nil {
@@ -245,6 +345,7 @@ func (i *Identify) identifySDVT(keyCounts map[string]uint64) error {
 	log.Debugf("Found %v SDVT operators", operatorsCount)
 
 	stats := &lidoModuleStats{}
+	failures := &operatorErrors{}
 	workerSemaphore := make(chan struct{}, 10)
 	var wg sync.WaitGroup
 
@@ -257,8 +358,9 @@ func (i *Identify) identifySDVT(keyCounts map[string]uint64) error {
 
 		go func(operatorIndex int64) {
 			defer wg.Done()
-			if err := i.processSDVTOperatorKeys(operatorIndex, keyCounts, stats); err != nil {
+			if err := i.processSDVTOperatorKeys(sdvtContract, operatorIndex, keyCounts, stats); err != nil {
 				log.Errorf("Error reconciling SDVT operator %v: %v", operatorIndex, err)
+				failures.add(fmt.Errorf("operator %d: %w", operatorIndex, err))
 			}
 			<-workerSemaphore
 		}(operatorIndex)
@@ -266,20 +368,15 @@ func (i *Identify) identifySDVT(keyCounts map[string]uint64) error {
 
 	wg.Wait()
 	if i.stop {
-		return nil
+		return failures.err()
 	}
 	log.Infof("SDVT module: operators=%d skipped=%d incremental=%d full=%d",
 		operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
 
-	return nil
+	return failures.err()
 }
 
-func (i *Identify) processSDVTOperatorKeys(operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
-	sdvtContract, err := sdvt.NewSDVTContract(i.iConfig.ElEndpoint)
-	if err != nil {
-		return err
-	}
-
+func (i *Identify) processSDVTOperatorKeys(sdvtContract *sdvt.SDVTContract, operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
 	operator, err := sdvtContract.GetOperatorData(big.NewInt(operatorIndex))
 	if err != nil {
 		return err
@@ -343,6 +440,7 @@ func (i *Identify) identifyCSMFamily(module csmFamilyModule, keyCounts map[strin
 	if err != nil {
 		return err
 	}
+	defer moduleContract.Close()
 
 	operatorsCount, err := moduleContract.GetNodeOperatorsCount()
 	if err != nil {
@@ -351,6 +449,7 @@ func (i *Identify) identifyCSMFamily(module csmFamilyModule, keyCounts map[strin
 	log.Debugf("Found %v %s operators", operatorsCount, module.name)
 
 	stats := &lidoModuleStats{}
+	failures := &operatorErrors{}
 	workerSemaphore := make(chan struct{}, 10)
 	var wg sync.WaitGroup
 
@@ -363,8 +462,9 @@ func (i *Identify) identifyCSMFamily(module csmFamilyModule, keyCounts map[strin
 
 		go func(operatorIndex int64) {
 			defer wg.Done()
-			if err := i.processCSMFamilyOperatorKeys(module, operatorIndex, keyCounts, stats); err != nil {
+			if err := i.processCSMFamilyOperatorKeys(moduleContract, module, operatorIndex, keyCounts, stats); err != nil {
 				log.Errorf("Error reconciling %s operator %v: %v", module.name, operatorIndex, err)
+				failures.add(fmt.Errorf("operator %d: %w", operatorIndex, err))
 			}
 			<-workerSemaphore
 		}(operatorIndex)
@@ -372,20 +472,15 @@ func (i *Identify) identifyCSMFamily(module csmFamilyModule, keyCounts map[strin
 
 	wg.Wait()
 	if i.stop {
-		return nil
+		return failures.err()
 	}
 	log.Infof("%s module: operators=%d skipped=%d incremental=%d full=%d",
 		module.name, operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
 
-	return nil
+	return failures.err()
 }
 
-func (i *Identify) processCSMFamilyOperatorKeys(module csmFamilyModule, operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
-	moduleContract, err := csm.NewContractAt(i.iConfig.ElEndpoint, module.address)
-	if err != nil {
-		return err
-	}
-
+func (i *Identify) processCSMFamilyOperatorKeys(moduleContract *csm.CSMContract, module csmFamilyModule, operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
 	operator, err := moduleContract.GetOperatorData(big.NewInt(operatorIndex))
 	if err != nil {
 		return err
@@ -449,6 +544,7 @@ func (i *Identify) identifyCuratedModule(keyCounts map[string]uint64) error {
 	if err != nil {
 		return err
 	}
+	defer lidoContract.Close()
 	log.Debug("Created a new instance of LidoContract")
 
 	log.Debug("Calling the GetOperatorsIndexes function")
@@ -457,9 +553,13 @@ func (i *Identify) identifyCuratedModule(keyCounts map[string]uint64) error {
 		return err
 	}
 	log.Debugf("Found %v operators", operatorsCount)
+	if listed := int64(len(lido.CuratedCanonicalOperators)); operatorsCount > listed {
+		log.Warnf("The curated registry has %d operators but lido.CuratedCanonicalOperators lists %d: operators %d and up keep their display tag as operator label until the list is extended", operatorsCount, listed, listed)
+	}
 
 	log.Debug("Getting keys for each operator")
 	stats := &lidoModuleStats{}
+	failures := &operatorErrors{}
 	workerSemaphore := make(chan struct{}, 10)
 	var wg sync.WaitGroup
 
@@ -472,8 +572,9 @@ func (i *Identify) identifyCuratedModule(keyCounts map[string]uint64) error {
 
 		go func(operatorIndex int64) {
 			defer wg.Done()
-			if err := i.processCuratedOperatorKeys(operatorIndex, keyCounts, stats); err != nil {
+			if err := i.processCuratedOperatorKeys(lidoContract, operatorIndex, keyCounts, stats); err != nil {
 				log.Errorf("Error reconciling curated operator %v: %v", operatorIndex, err)
+				failures.add(fmt.Errorf("operator %d: %w", operatorIndex, err))
 			}
 			<-workerSemaphore
 		}(operatorIndex)
@@ -482,20 +583,15 @@ func (i *Identify) identifyCuratedModule(keyCounts map[string]uint64) error {
 
 	wg.Wait()
 	if i.stop {
-		return nil
+		return failures.err()
 	}
 	log.Infof("Curated module: operators=%d skipped=%d incremental=%d full=%d",
 		operatorsCount, stats.skipped.Load(), stats.incremental.Load(), stats.full.Load())
 
-	return nil
+	return failures.err()
 }
 
-func (i *Identify) processCuratedOperatorKeys(operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
-	lidoContract, err := curated.NewCuratedModuleContract(i.iConfig.ElEndpoint)
-	if err != nil {
-		return err
-	}
-
+func (i *Identify) processCuratedOperatorKeys(lidoContract *curated.CuratedModuleContract, operatorIndex int64, keyCounts map[string]uint64, stats *lidoModuleStats) error {
 	operator, err := lidoContract.GetOperatorData(big.NewInt(operatorIndex))
 	if err != nil {
 		return err
