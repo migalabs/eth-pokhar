@@ -61,6 +61,7 @@ var definedOperatorsNames = []string{
 
 type CuratedModuleContract struct {
 	contract *NodeOperatorsRegistryCaller
+	client   *ethclient.Client
 	address  string
 }
 
@@ -69,14 +70,21 @@ func NewCuratedModuleContract(nodeEndpoint string) (*CuratedModuleContract, erro
 	if err != nil {
 		return nil, err
 	}
-	defer ethClient.Close()
 
 	contract, err := NewNodeOperatorsRegistryCaller(common.HexToAddress(NODE_OPS_ADDRESS), ethClient)
 	if err != nil {
+		ethClient.Close()
 		return nil, err
 	}
-	return &CuratedModuleContract{contract: contract, address: NODE_OPS_ADDRESS}, nil
+	return &CuratedModuleContract{contract: contract, client: ethClient, address: NODE_OPS_ADDRESS}, nil
 }
+
+// Close releases the connection to the execution endpoint. The contract must
+// not be used afterwards. It is safe for concurrent calls until then.
+func (l *CuratedModuleContract) Close() {
+	l.client.Close()
+}
+
 func (l *CuratedModuleContract) GetNodeOperatorsCount() (int64, error) {
 	result, err := lido.RetryContractCall(func() (interface{}, error) {
 		return l.contract.GetNodeOperatorsCount(nil)
@@ -116,8 +124,13 @@ func (l *CuratedModuleContract) GetOperatorData(index *big.Int) (NodeOperator, e
 }
 
 func (l *CuratedModuleContract) GetOperatorKeys(operator NodeOperator, offset uint64, limit uint64) (OperatorKeys, error) {
+	// A truncated answer is retried like any other failed call.
 	result, err := lido.RetryContractCall(func() (interface{}, error) {
-		return l.contract.GetSigningKeys(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(offset)), big.NewInt(int64(limit)))
+		keys, err := l.contract.GetSigningKeys(nil, big.NewInt(int64(operator.Index)), big.NewInt(int64(offset)), big.NewInt(int64(limit)))
+		if err != nil {
+			return nil, err
+		}
+		return keys, lido.CheckPubkeysLength(keys.Pubkeys, limit)
 	})
 	if err != nil {
 		return OperatorKeys{}, err

@@ -2,13 +2,16 @@
 
 ## sync-labels-to-clickhouse.sh
 
-Distributes the labels produced by the identify pipeline (Postgres `t_identified_validators`) to a goteth ClickHouse database (`t_eth2_pubkeys`). Replaces the legacy per-machine TRUNCATE + INSERT scripts with the design from issue #31:
+Distributes the labels produced by the identify pipeline (Postgres `t_identified_validators`) to a goteth ClickHouse database (`t_eth2_pubkeys`). Replaces the legacy per-machine TRUNCATE + INSERT scripts with the design from issue #31.
+
+Three values travel per validator: the display label `f_pool_name`, and the two pure dimensions `f_operator` and `f_custodian`, so consumers can tell who runs a validator from who holds its withdrawal credentials without re-deriving either. A Postgres `NULL` (no declared signal for that dimension) becomes the empty string, which is the single spelling for "not identified" on the ClickHouse side.
 
 - **Atomic**: imports into `t_eth2_pubkeys_staging`, applies with `EXCHANGE TABLES`. Consumers never observe an empty or partial mapping. After a successful run the staging table holds the previous mapping, so rollback is one more `EXCHANGE TABLES`.
 - **Versioned**: each applied snapshot inserts a row into `t_eth2_pubkeys_version` (query with `FINAL`, it keeps the highest `f_version`). Consumers such as the goteth pool summary reroll can log exactly which labels version they operate on.
-- **Gated**: the snapshot is rejected, keeping the previous mapping, if it is empty, if it shrinks below `SYNC_MIN_COUNT_RATIO` of the previous count, or if any existing pool loses more than `SYNC_MAX_POOL_DROP` validators. Legitimate renames or splits are declared in the allowlist file (`SYNC_POOL_RENAME_ALLOWLIST`, one pool name per line) for the run where they happen.
+- **Gated**: the snapshot is rejected, keeping the previous mapping, if it is empty, if it shrinks below `SYNC_MIN_COUNT_RATIO` of the previous count, or if any existing pool loses more than `SYNC_MAX_POOL_DROP` validators. Legitimate renames or splits are declared in the allowlist file (`SYNC_POOL_RENAME_ALLOWLIST`, one pool name per line) for the run where they happen. The dimensions have their own gate: a dimension that was populated and arrives empty for every validator is always rejected, and `SYNC_MIN_DIMENSION_RATIO` (default `0`, off) rejects smaller drops too.
 - **Monitored**: with `TEXTFILE_DIR` set, exports `cron_job_last_run_timestamp_seconds`, `cron_job_last_run_time_taken_milliseconds` and `cron_job_last_run_exit_status` for node_exporter's textfile collector.
-- **Optional mirror**: with `SYNC_PUBKEY_POOL=true`, also refreshes the `t_pubkey_pool` mirror (pubkey to pool without a val_idx, used to label deposits still in the pending queue) with the same staging plus `EXCHANGE TABLES` pattern. Enable it only on deployments that have that table.
+- **Optional mirror**: with `SYNC_PUBKEY_POOL=true`, also refreshes the `t_pubkey_pool` mirror (pubkey to pool without a val_idx, used to label deposits still in the pending queue) with the same staging plus `EXCHANGE TABLES` pattern. Enable it only on deployments that have that table. The mirror stays pool-only on purpose: it exists to label deposits that have no validator index yet, so validators in the pending queue carry no dimensions anywhere until they are assigned one.
+- **Schema aware**: `f_operator` and `f_custodian` exist only in destinations that ran goteth migration `000041`. `SYNC_DIMENSIONS` decides what to do about it: `auto` (the default) carries them when the destination has them and distributes pool labels alone, with a warning, when it does not; `true` requires them and fails before writing anything; `false` never carries them. Deployments are not upgraded in lockstep, and a sync that refused to run would stop distributing pool labels as well, which is the silent staleness this script exists to prevent.
 - **Single source read**: Postgres is read exactly once per run into `t_labels_snapshot`, and both the main mapping and the mirror are derived from it. All distributed tables therefore reflect the same instant of the source and are covered by the same gates; there is no window for cross-table drift between them.
 
 ### Example
@@ -32,6 +35,9 @@ export CH_PASS=...
 export CH_DB=goteth
 export TEXTFILE_DIR=/path/to/node_exporter/textfiles
 export CRON_NAME=labels_sync_mainnet
+# Optional. Default auto: carry the dimensions if the destination has them.
+export SYNC_DIMENSIONS=true
+export SYNC_MIN_DIMENSION_RATIO=0.9
 ```
 
 Note: the import runs server-side via the `postgresql()` table function, so `PG_HOST:PG_PORT` must be reachable from the ClickHouse **server**, not from the shell running the script. If the Postgres is remote, open the tunnel before invoking the script and bind it on an address the server can reach, or use the launcher below which handles that.
@@ -56,6 +62,24 @@ export SYNC_TUNNEL_WAIT_SECS=20
 ```
 
 Mind the bind address: the import runs inside the ClickHouse **server**, so the tunnel must listen where that server can reach it. The default `127.0.0.1` only works when ClickHouse runs directly on the launcher's host (or with `--network=host`); a bridge-networked ClickHouse container has its own isolated loopback and will never reach the host's `127.0.0.1`, even though the launcher's health check passes. For that layout bind on `0.0.0.0` or the docker bridge IP, and set `PG_HOST` accordingly (e.g. the bridge gateway).
+
+### Deploying a release that moves validators between pools
+
+The pool-drop gate cannot tell a release that relabels validators from a source that lost them. The release that adds Lido CMv2 and CSM 0x02 (eth-pokhar#50) is one: every CMv2 and CSM 0x02 validator moves from `lido`, the StakingRouter fallback label, to `lido_cmv2` or `lido_csm0x02`. On the testing ClickHouse on 2026-11-22 that was 4,939 validators (4,909 CMv2 and 30 CSM 0x02), just under the default `SYNC_MAX_POOL_DROP` of 5000 and growing as curated operators consolidate into CMv2. For the first sync after deploying it, on every destination:
+
+1. Put `lido` in the allowlist file (`SYNC_POOL_RENAME_ALLOWLIST`) and run the sync once.
+2. Check the run: the log lists `lido` under "Allowlisted pool drops" with about that many validators and reports no gate failure, and `SELECT f_pool_name, count() FROM t_eth2_pubkeys WHERE f_pool_name IN ('lido', 'lido_cmv2', 'lido_csm0x02') GROUP BY f_pool_name` shows the two new pools holding them.
+3. Remove `lido` from the allowlist, so a real loss is caught again.
+
+Every allowlisted pool that loses validators is listed in the log, gated or not, so the run that needed the allowlist leaves a record of what it let through.
+
+### Ephemeral tables are recreated, never reused
+
+`t_labels_snapshot`, `t_eth2_pubkeys_staging` and `t_pubkey_pool_staging` are dropped and recreated on every run. This is not tidiness: `EXCHANGE TABLES` swaps two names without comparing their schemas, so a staging table left over from before a column was added to `t_eth2_pubkeys` swaps that column straight back out of the live table, with no error and nothing in the log to show for it. The next run swaps it back, and the live schema flips on every run. Recreating from `CREATE TABLE t_eth2_pubkeys_staging AS t_eth2_pubkeys` keeps the two in step by construction.
+
+It costs nothing: the rollback copy staging is meant to hold is the one the swap itself puts there, not the one from the run before, which was being truncated at that same point anyway.
+
+A destination that an older version of this script already left with the stale schema live is repaired on the next run rather than finished off: before anything is dropped, the two tables are compared, and if staging carries the dimension columns while the live table does not, they are added back to the live table with the column definitions of goteth migration `000041`. The repair restores the columns and leaves the data alone. Swapping staging back in would also publish whatever it holds, and an older run that failed after the stale swap leaves it empty or holding a snapshot the gates rejected, which the gates of that same run would then compare against. Instead the live table keeps serving the mapping it has, the gates compare against that as usual, and the new columns read empty until the run's swap fills them. The repair is scoped to `f_operator` and `f_custodian` deliberately: a column renamed or dropped on `t_eth2_pubkeys` leaves exactly the same trace in staging, and restoring it would revert the migration, so any other column is reported and left alone. When staging carries such a column and the dimension columns as well, a stale swap is the likely cause and that column was lost the same way, so the run stops with nothing dropped and says how to resolve it by hand: rebuilding staging would delete the only copy of those columns. A rollback of the dimensions themselves leaves that trace too, so the repair also reads goteth's `schema_migrations`: it adds the columns back only while the destination is at or past the dimensions migration (`SYNC_DIMENSIONS_MIGRATION`, default `41`), rebuilds staging without them below it (including `-1`, every migration rolled back), and stops with nothing dropped, printing why, when the migration state cannot be read or is dirty.
 
 ### Credentials handling
 
