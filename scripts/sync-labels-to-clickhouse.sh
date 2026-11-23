@@ -128,25 +128,33 @@ echo "$LOG_PREFIX $(date -u +%FT%TZ) Starting labels sync..."
 # only in t_eth2_pubkeys_staging. Recreating staging unconditionally would
 # then delete that last copy and make the loss permanent, so the two tables
 # are reconciled before anything is dropped: if staging carries the dimension
-# columns and the live table does not, the previous run swapped the wrong way
-# round and one more EXCHANGE puts it back.
+# columns and the live table does not, they are added back to the live table.
+#
+# The repair restores the columns, not the table. Swapping staging back in
+# would also publish whatever it holds, and an older run that failed after
+# the stale swap leaves it empty or holding a snapshot the gates rejected;
+# publishing that would also make the gates below compare against it. The
+# live table keeps serving the mapping it has, the gates compare against that
+# as usual, and the new columns read '' until this run's swap fills them.
 #
 # Scoped to the two columns this script owns on purpose. "Staging has a column
 # the live table lacks" is also what a deliberate goteth migration looks like
 # from here: a rename leaves the old name behind in staging, a drop leaves the
 # dropped column. Restoring either would revert that migration, so anything
-# beyond the dimensions is reported and left alone.
+# beyond the dimensions is reported and left alone. When such columns are all
+# staging has over the live table, the run goes on and rebuilds staging. When
+# it carries the dimension columns as well, a stale swap is the likely cause and
+# those other columns were lost the same way, so the run stops before
+# dropping their only copy and leaves the call to a person.
 #
 # A deliberate rollback of the dimensions (goteth's down migration drops both
-# columns) leaves the same trace, so the swap also requires goteth's migration
-# state to say the columns should be there: the latest schema_migrations row
-# is clean and at or past SYNC_DIMENSIONS_MIGRATION. Below it, the columns
-# were dropped on purpose and staging is rebuilt without them. When the state
-# cannot be read, the run stops before dropping anything and asks for a hand.
-#
-# The live table serves the previous mapping between this swap and the one at
-# the end of the run. That mapping is complete and at most one run old, which
-# is the point of doing this rather than dropping the only copy of the schema.
+# columns) leaves the same trace, so the repair also requires goteth's
+# migration state to say the columns should be there: the latest
+# schema_migrations row is clean and at or past SYNC_DIMENSIONS_MIGRATION.
+# Below it, the columns were dropped on purpose and staging is rebuilt without
+# them. When the state cannot be read, the run stops before dropping anything
+# and asks for a hand.
+
 LIVE_COLS=$(ch "
     SELECT count()
     FROM system.columns
@@ -168,7 +176,20 @@ ORPHAN_COLS=$(ch "
     )
 ") || exit 1
 
-# Same column list as the dimensions check below; keep the two in step.
+# Same column list as the dimensions check below; keep the three in step.
+DIM_ORPHANS=$(ch "
+    SELECT arrayStringConcat(arraySort(groupArray(name)), ', ')
+    FROM (
+        SELECT name FROM system.columns
+        WHERE database = currentDatabase()
+          AND table = 't_eth2_pubkeys_staging'
+          AND name IN ('f_operator', 'f_custodian')
+        EXCEPT
+        SELECT name FROM system.columns
+        WHERE database = currentDatabase() AND table = 't_eth2_pubkeys'
+    )
+") || exit 1
+
 FOREIGN_ORPHANS=$(ch "
     SELECT arrayStringConcat(arraySort(groupArray(name)), ', ')
     FROM (
@@ -184,9 +205,14 @@ FOREIGN_ORPHANS=$(ch "
 
 if [ -n "$FOREIGN_ORPHANS" ]; then
     echo "$LOG_PREFIX WARNING: t_eth2_pubkeys_staging has columns the live table lacks ($ORPHAN_COLS), of which this script owns none ($FOREIGN_ORPHANS)."
+    if [ -n "$DIM_ORPHANS" ]; then
+        echo "$LOG_PREFIX ERROR: staging also holds the dimension columns the live table lacks ($DIM_ORPHANS), so an older run most likely swapped a stale schema into place, and rebuilding staging would drop the only copy of all of them. Nothing was dropped."
+        echo "$LOG_PREFIX Resolve by hand: add back to t_eth2_pubkeys whichever of these columns it should have (the dimension columns with the ALTER TABLE of goteth migration $SYNC_DIMENSIONS_MIGRATION), then DROP TABLE t_eth2_pubkeys_staging."
+        exit 1
+    fi
     echo "$LOG_PREFIX Leaving the live schema alone: a column renamed or dropped on t_eth2_pubkeys looks exactly like this from here, and restoring it would revert that migration."
-elif [ -n "$ORPHAN_COLS" ]; then
-    echo "$LOG_PREFIX WARNING: the live table is missing the dimension columns ($ORPHAN_COLS) while t_eth2_pubkeys_staging still has them."
+elif [ -n "$DIM_ORPHANS" ]; then
+    echo "$LOG_PREFIX WARNING: the live table is missing the dimension columns ($DIM_ORPHANS) while t_eth2_pubkeys_staging still has them."
     # golang-migrate keeps the current version in the row with the highest
     # sequence; -1 means every migration was rolled back.
     MIGRATION_ERROR=""
@@ -197,14 +223,17 @@ elif [ -n "$ORPHAN_COLS" ]; then
     read -r MIGRATION_VERSION MIGRATION_DIRTY <<< "$MIGRATION_STATE"
     if ! [[ "${MIGRATION_VERSION:-}" =~ ^-?[0-9]+$ ]] || [ "${MIGRATION_DIRTY:-}" != "0" ]; then
         echo "$LOG_PREFIX ERROR: cannot tell whether the dimension columns were dropped on purpose: goteth's schema_migrations is missing, empty or dirty ('$MIGRATION_STATE'${MIGRATION_ERROR:+, $MIGRATION_ERROR}). Nothing was dropped."
-        echo "$LOG_PREFIX Resolve by hand: EXCHANGE TABLES t_eth2_pubkeys AND t_eth2_pubkeys_staging if migration $SYNC_DIMENSIONS_MIGRATION is applied, or DROP TABLE t_eth2_pubkeys_staging if it was rolled back."
+        echo "$LOG_PREFIX Resolve by hand: add the columns to t_eth2_pubkeys with the ALTER TABLE of goteth migration $SYNC_DIMENSIONS_MIGRATION if it is applied, or DROP TABLE t_eth2_pubkeys_staging if it was rolled back."
         exit 1
     elif [ "$MIGRATION_VERSION" -lt "$SYNC_DIMENSIONS_MIGRATION" ]; then
         echo "$LOG_PREFIX goteth is at migration $MIGRATION_VERSION, below $SYNC_DIMENSIONS_MIGRATION: the dimension columns were rolled back on purpose. Leaving the live schema alone; staging is rebuilt without them."
     else
-        echo "$LOG_PREFIX goteth is at migration $MIGRATION_VERSION: a previous run swapped a stale schema into place; restoring it with one EXCHANGE TABLES before rebuilding."
-        ch "EXCHANGE TABLES t_eth2_pubkeys AND t_eth2_pubkeys_staging" || {
-            echo "$LOG_PREFIX ERROR: schema repair swap failed, nothing was dropped"
+        echo "$LOG_PREFIX goteth is at migration $MIGRATION_VERSION: a previous run swapped a stale schema into place; adding the dimension columns back to the live table before rebuilding. Its data is left alone."
+        # The column definitions of goteth migration 000041; keep them in step.
+        ch "ALTER TABLE t_eth2_pubkeys
+                ADD COLUMN IF NOT EXISTS f_operator TEXT DEFAULT '' CODEC(ZSTD(3)),
+                ADD COLUMN IF NOT EXISTS f_custodian TEXT DEFAULT '' CODEC(ZSTD(3))" || {
+            echo "$LOG_PREFIX ERROR: schema repair failed, nothing was dropped"
             exit 1
         }
     fi
